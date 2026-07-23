@@ -1,7 +1,7 @@
 name: daily-run
 on:
   schedule:
-    - cron: "40 20 * * 1-5"   # 30 min after US close (16:40 ET during DST)
+    - cron: "40 14,20 * * 1-5"   # 10:40 ET (post-open settle) and 16:40 ET (post-close), DST
   workflow_dispatch: {}
 
 concurrency:

@@ -2,7 +2,15 @@ name: daily-run
 on:
   # Fired by Cloud Scheduler (arena-daily-run: 40 14,20 * * 1-5 UTC) via workflow_dispatch.
   # No GH cron: brain runs are not idempotent, so exactly one trigger source.
-  workflow_dispatch: {}
+  # Slot tiers: 14:40 UTC = 'open' (house agents only), 20:40 = 'close' (all
+  # agents — seated tier runs once daily here). Inferred from the UTC hour by
+  # jobs/dispatch.py when the slot input is blank.
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: "open | close (blank = infer from current UTC hour)"
+        required: false
+        default: ""
 
 concurrency:
   group: brains
@@ -32,6 +40,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DAILY_SLOT: ${{ inputs.slot }}
           TRADER_REPO: ${{ github.workspace }}/trader
           GIT_SSH_COMMAND: ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes
         run: python -m jobs.dispatch

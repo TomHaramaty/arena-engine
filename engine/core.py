@@ -209,6 +209,33 @@ def evaluate_standing_orders(conn, quotes, now=None):
     return filled
 
 
+def bootstrap_launches(conn, quotes, now=None):
+    """First bell for seated-but-unlaunched agents (agent_state.launched is
+    null — how jobs/ingest.py seats them): once every benchmark symbol has a
+    fresh quote, stamp launched and record bench launch_prices. Until then
+    mark_all skips them, so the record starts exactly at the bell."""
+    now = now or datetime.now(timezone.utc)
+    prices = {s: q["price"] for s, q in quotes.items()}
+    launched = []
+    with conn.cursor() as cur:
+        cur.execute("select agent_id, bench from agent_state where launched is null")
+        rows = cur.fetchall()
+    for r in rows:
+        bench = r["bench"]
+        syms = bench.get("symbols") or []
+        if not syms or any(s not in prices for s in syms):
+            continue
+        if not bench.get("launch_prices"):
+            bench["launch_prices"] = [prices[s] for s in syms]
+        conn.execute(
+            "update agent_state set launched=%s, bench=%s where agent_id=%s",
+            (now.date(), json.dumps(bench), r["agent_id"]),
+        )
+        launched.append(r["agent_id"])
+    conn.commit()
+    return launched
+
+
 def mark_all(conn, quotes, now=None):
     """Mark every active agent's portfolio; update peak; detect drawdown
     triggers. Skips an agent if any of its position symbols lacks a fresh

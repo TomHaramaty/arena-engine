@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -q "psycopg[binary]" requests
+      - run: pip install -q "psycopg[binary]" requests google-cloud-firestore
       - name: Run tick
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -45,6 +45,15 @@ jobs:
           TRADER_REPO: ${{ github.workspace }}/trader
           GIT_SSH_COMMAND: ssh -i ~/.ssh/trader_key -o IdentitiesOnly=yes
         run: python -m jobs.dispatch --triggers-only
+      - name: Ingest seat applications
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TRADER_REPO: ${{ github.workspace }}/trader
+          GIT_SSH_COMMAND: ssh -i ~/.ssh/trader_key -o IdentitiesOnly=yes
+          FIRESTORE_SERVICE_ACCOUNT: ${{ secrets.FIRESTORE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$FIRESTORE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/fs_sa.json"
+          GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/fs_sa.json" python -m jobs.ingest
       - name: Build and deploy interface
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

@@ -25,6 +25,8 @@ def main():
         raise SystemExit("no quotes fetched — aborting tick (no marks, no fills)")
 
     core.insert_ticks(conn, quotes)
+    for aid in core.bootstrap_launches(conn, quotes):
+        print(f"FIRST BELL: {aid} launched")
     filled = core.evaluate_standing_orders(conn, quotes)
     for o, price, qty in filled:
         print(f"STANDING ORDER FILLED: {o['agent_id']} {o['kind']} {o['side']} "

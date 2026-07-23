@@ -12,6 +12,11 @@ create table if not exists agents (
   created_at timestamptz not null default now()
 );
 
+-- seat-application ingestion (2026-07-23): interview-born agents carry an
+-- owning principal and a cadence tier ('house' 2x/day · 'seated' 1x/day).
+alter table agents add column if not exists owner_uid text;
+alter table agents add column if not exists tier text not null default 'house';
+
 create table if not exists agent_state (
   agent_id text primary key references agents(id),
   cash numeric not null,

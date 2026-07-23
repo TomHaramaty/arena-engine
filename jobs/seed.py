@@ -19,19 +19,19 @@ CRYPTO = {"BTC-USD": "BINANCE:BTCUSDT", "ETH-USD": "BINANCE:ETHUSDT"}
 
 AGENTS = {
     "tempo": {
-        "name": "Tempo", "archetype": "Momentum rider", "brain": "routine-claude",
+        "name": "Tempo", "archetype": "Momentum rider", "brain": "antigravity-gemini",
         "config": {"max_single_pct": 0.25, "cluster_cap_pct": 0.40},
     },
     "catalyst": {
-        "name": "Catalyst", "archetype": "Event-driven", "brain": "routine-claude",
+        "name": "Catalyst", "archetype": "Event-driven", "brain": "antigravity-gemini",
         "config": {"max_single_pct": 0.20, "max_positions": 6},
     },
     "vertex": {
-        "name": "Vertex", "archetype": "Concentrated growth", "brain": "routine-claude",
+        "name": "Vertex", "archetype": "Concentrated growth", "brain": "antigravity-gemini",
         "config": {"max_single_pct": 0.35, "min_positions": 3, "max_positions": 5},
     },
     "maverick": {
-        "name": "Maverick", "archetype": "Aggressive contrarian", "brain": "routine-claude",
+        "name": "Maverick", "archetype": "Aggressive contrarian", "brain": "antigravity-gemini",
         "config": {"max_single_pct": 0.25},
     },
     "wildcat": {

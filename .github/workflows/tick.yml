@@ -11,7 +11,7 @@ concurrency:
 jobs:
   tick:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -23,3 +23,23 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           FINNHUB_KEY: ${{ secrets.FINNHUB_KEY }}
         run: python -m jobs.tick
+      - name: Wake triggered agents
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TRADER_SSH_KEY: ${{ secrets.TRADER_SSH_KEY }}
+        run: |
+          N=$(python - <<'EOF'
+          from engine import db
+          conn = db.connect()
+          print(conn.execute("select count(distinct agent_id) c from triggers_fired where not handled").fetchone()["c"])
+          EOF
+          )
+          if [ "$N" = "0" ]; then echo "no triggers — done"; exit 0; fi
+          mkdir -p ~/.ssh && echo "$TRADER_SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+          git clone -q --branch claude/arena git@github.com:TomHaramaty/trader-arena.git trader
+          git -C trader config user.name "arena-bot"
+          git -C trader config user.email "arena-bot@users.noreply.github.com"
+          TRADER_REPO="$PWD/trader" python -m jobs.dispatch --triggers-only

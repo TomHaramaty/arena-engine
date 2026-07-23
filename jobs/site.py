@@ -42,15 +42,19 @@ def parse_principles(path):
         if h:
             if cur:
                 out.append(cur)
-            cur = {"id": h.group(1), "statement": h.group(2).strip(), "type": "",
-                   "rigidity": "", "scope": "", "origin": "", "status": "active",
+            cur = {"id": h.group(1), "statement": h.group(2).strip(), "detail": "",
+                   "type": "", "rigidity": "", "scope": "", "origin": "", "status": "active",
                    "ev_for": 0, "ev_against": 0, "changelog": []}
             mode = None
             continue
         if cur is None:
             continue
         s = line.strip()
-        if s.startswith("- type:") or s.startswith("- origin:"):
+        if s and not s.startswith("- ") and mode is None:
+            # free-form elaboration between the heading and the metadata lines —
+            # principles may be as long as the agent needs
+            cur["detail"] = (cur["detail"] + "\n" + s).strip()
+        elif s.startswith("- type:") or s.startswith("- origin:"):
             for part in s[1:].split("·"):
                 if ":" in part:
                     k, v = part.split(":", 1)
@@ -103,6 +107,8 @@ def parse_journal(agent_dir):
                 continue
             b = re.split(r"(?m)^---\s*$", b, maxsplit=1)[0].strip()
             head = b.splitlines()[0]
+            # collapse an accidentally doubled leading date ("2026-07-23 — 2026-07-23 — …")
+            head = re.sub(r"^(\d{4}-\d{2}-\d{2})(\s*[—-]+\s*\d{4}-\d{2}-\d{2})+", r"\1", head)
             m = re.match(r"(\d{4}-\d{2}-\d{2})\s*[—-]+\s*(\w+)\s*[—-]+\s*(.+)", head)
             if not m:
                 m2 = re.match(r"(\d{4}-\d{2}-\d{2})\s*[—-]+\s*(.+)", head)

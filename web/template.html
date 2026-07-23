@@ -109,6 +109,9 @@
   .edate { font-family: var(--mono); font-size: 12px; color: var(--muted); }
   .etitle { font-weight: 650; font-size: 15px; }
   .ebody { color: var(--ink2); font-size: 14px; margin: 8px 0 0; max-width: 80ch; white-space: pre-wrap; }
+  .ebody strong, .eactions strong { color: var(--ink); font-weight: 650; }
+  .ebody .mdh { display: inline-block; margin-top: 6px; }
+  .ebody code, .eactions code { font-family: var(--mono); font-size: 12.5px; background: var(--hover); border-radius: 4px; padding: 0 4px; }
   .eactions { margin: 10px 0 0; font-size: 13px; color: var(--ink); font-family: var(--mono); background: var(--hover); border-radius: 6px; padding: 8px 10px; white-space: pre-wrap; }
   .plist { display: flex; flex-direction: column; gap: 10px; }
   .prin { padding: 14px 16px; }
@@ -177,6 +180,16 @@ const pct = (v, dp=1) => (v>=0?"+":"−") + Math.abs(v*100).toFixed(dp) + "%";
 const pctPlain = (v, dp=1) => Math.abs(v*100).toFixed(dp) + "%";
 const money = v => "$" + Math.round(v).toLocaleString("en-US");
 const esc = s => (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;");
+/* minimal markdown for journal prose: headings, bold, italics, code, bullets */
+function md(s){
+  let h = esc(s);
+  h = h.replace(/^#{2,4}\s+(.*)$/gm, "<strong class=\"mdh\">$1</strong>")
+       .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+       .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s.,;:)]|$)/gm, "$1<em>$2</em>")
+       .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+       .replace(/^\s*[-•]\s+/gm, "• ");
+  return h;
+}
 const tooltip = document.getElementById("tooltip");
 const $ = s => document.querySelector(s);
 const state = { view:"arena", agent: AGENTS[0] && AGENTS[0].id, subtab:"journal", compare:new Set(AGENTS.map(a=>a.id)) };
@@ -263,8 +276,8 @@ function journalHTML(a){
   return `<div class="feed">`+a.journal.map(e=>`
     <div class="card entry">
       <div class="entryhead"><span class="badge ${e.type}">${e.type==="reflect"?"REFLECTION":e.type.toUpperCase()}</span><span class="edate">${fmtDate(e.date)}</span><span class="etitle">${esc(e.title)}</span></div>
-      ${e.rationale?`<p class="ebody">${esc(e.rationale)}</p>`:""}
-      ${e.actions && e.actions.toLowerCase()!=="none" && e.actions.trim()?`<div class="eactions">${esc(e.actions)}</div>`:""}
+      ${e.rationale?`<p class="ebody">${md(e.rationale)}</p>`:""}
+      ${e.actions && e.actions.toLowerCase()!=="none" && e.actions.trim()?`<div class="eactions">${md(e.actions)}</div>`:""}
     </div>`).join("")+`</div>`;
 }
 function principlesHTML(a){
@@ -275,6 +288,7 @@ function principlesHTML(a){
     return `<div class="card prin ${p.status}">
       <div class="prinhead"><span class="pstatus ${p.status}">${(p.status||"active").toUpperCase()}</span>${p.type?`<span class="ptag">${esc(p.type)}</span>`:""}${p.rigidity?`<span class="ptag">${esc(p.rigidity)}</span>`:""}<span class="pmeta">${esc(p.scope)}${p.origin?" · origin: "+esc(p.origin):""}</span></div>
       <div class="pstate">“${esc(p.statement)}”</div>
+      ${p.detail?`<p class="ebody" style="margin-top:4px">${md(p.detail)}</p>`:""}
       <div class="evi">${bar}<span>evidence: ${p.ev_for} for · ${p.ev_against} against</span></div>
       ${p.changelog.length?`<ul class="plog">${p.changelog.map(l=>`<li><span class="d">${l.date}</span>${esc(l.text)}</li>`).join("")}</ul>`:""}
     </div>`; }).join("")+`</div>`;

@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-07-23 07:31 UTC",
+ "generated_at": "2026-07-23 07:49 UTC",
  "run_date": "2026-07-23",
  "initial_capital": 100000.0,
  "agents": [
@@ -18,7 +18,7 @@
    "cash_pct": 0.8002397123451856,
    "ret": -0.000299550673988902,
    "alpha": 0.0015704493260110253,
-   "max_dd": 0.0,
+   "max_dd": -0.00029955067398901303,
    "curve": [
     {
      "date": "Jul 22 19:10",
@@ -47,6 +47,10 @@
     {
      "date": "Jul 23 06:38",
      "v": 100.0
+    },
+    {
+     "date": "Jul 23 07:34",
+     "v": 99.97
     }
    ],
    "bench_curve": [
@@ -76,6 +80,10 @@
     },
     {
      "date": "Jul 23 06:38",
+     "v": 99.813
+    },
+    {
+     "date": "Jul 23 07:34",
      "v": 99.813
     }
    ],
@@ -116,6 +124,13 @@
    ],
    "journal": [
     {
+     "date": "2026-07-23",
+     "type": "hold",
+     "title": "BUY MSFT \u2014 Pre-Earnings Setup for July 29 Azure Catalyst",
+     "rationale": "- **Catalyst Datable**: Microsoft reports Q2 earnings on July 29, 2026 (6 sessions out).\n- **P1 Expected Reaction Memo**:\n  - *Scenario A (Bull)*: Azure growth >= 39% YoY with strong commercial remaining performance obligations (RPO). Expected price target: $430.00 (+10.15%).\n  - *Scenario B (Base)*: In-line results, Azure ~37-38%. Expected price range: $398.00\u2013$405.00 (+2% to +4%).\n  - *Scenario C (Bear)*: Azure < 36% or AI margin compression concerns. Risk level: $372.00 (-4.70%).\n- **P3 Sizing & Asymmetry**: Risk = $18.34 ($390.34 - $372.00); Reward = $39.66 ($430.00 - $390.34). Asymmetry ratio = 2.16:1 (meets >2:1 requirement).\n- **P5 Exit Plan**: Hard stop registered at $372.00; review/exit date scheduled for 2026-07-31 (within 2 sessions post-catalyst per P2).",
+     "actions": "- Submitted buy order for MSFT: $20,000 notional (max 20% position size per constitution).\n- Registered standing stop-loss order for MSFT at $372.00."
+    },
+    {
      "date": "2026-07-22",
      "type": "hold",
      "title": "Bootstrap: memos written, no entry, catalysts haven't resolved yet",
@@ -148,6 +163,7 @@
     {
      "id": "P1",
      "statement": "No entry without a written expected-reaction memo: what happens, when, and what price should do in each scenario",
+     "detail": "",
      "type": "entry",
      "rigidity": "hard",
      "scope": "all entries",
@@ -165,6 +181,7 @@
     {
      "id": "P2",
      "statement": "The edge dies with the event \u2014 exit within 2 sessions after the catalyst resolves",
+     "detail": "",
      "type": "exit",
      "rigidity": "hard",
      "scope": "all positions",
@@ -182,6 +199,7 @@
     {
      "id": "P3",
      "statement": "Size by asymmetry: risk 1 to make 2 or better, otherwise pass",
+     "detail": "",
      "type": "sizing",
      "rigidity": "heuristic",
      "scope": "all entries",
@@ -199,6 +217,7 @@
     {
      "id": "P4",
      "statement": "The first reaction is incomplete \u2014 trade the drift, not the gap",
+     "detail": "",
      "type": "entry",
      "rigidity": "heuristic",
      "scope": "post-event entries",
@@ -216,6 +235,7 @@
     {
      "id": "P5",
      "statement": "Never hold through an event without a pre-committed exit plan for both outcomes",
+     "detail": "",
      "type": "process",
      "rigidity": "hard",
      "scope": "every event held through",
@@ -258,7 +278,7 @@
    "n_principles": 5,
    "n_revisions": 0,
    "n_hyp_testing": 2,
-   "last_action": "Bootstrap: memos written, no entry, catalysts haven't resolved yet"
+   "last_action": "BUY MSFT \u2014 Pre-Earnings Setup for July 29 Azure Catalyst"
   },
   {
    "id": "maverick",
@@ -275,7 +295,7 @@
    "cash_pct": 0.5000024488032362,
    "ret": -4.897582486007579e-06,
    "alpha": 0.0018651024175139197,
-   "max_dd": -0.0002590449600000655,
+   "max_dd": -0.0003743000233707994,
    "curve": [
     {
      "date": "Jul 22 19:10",
@@ -304,6 +324,10 @@
     {
      "date": "Jul 23 06:38",
      "v": 100.037
+    },
+    {
+     "date": "Jul 23 07:34",
+     "v": 99.9995
     }
    ],
    "bench_curve": [
@@ -333,6 +357,10 @@
     },
     {
      "date": "Jul 23 06:38",
+     "v": 99.813
+    },
+    {
+     "date": "Jul 23 07:34",
      "v": 99.813
     }
    ],
@@ -384,6 +412,13 @@
    ],
    "journal": [
     {
+     "date": "2026-07-23",
+     "type": "hold",
+     "title": "PLTR Dislocation Entry ($25,000 Notional); MSFT Standing Stop Registered",
+     "rationale": "1. PLTR Entry (P1, P2): PLTR is trading at $124.57, down 40.0% from its 52-week high of $207.52 [1.1, 1.2]. Panic is a price, not information (P2). The structural test (P1) passes unequivocally: US commercial revenue growth accelerated to 133% YoY in Q1 2026, and management delivered the largest full-year guidance raise in company history [1.5, 1.6]. The 6.1% single-session drop today reflects sector-wide SaaS multiple compression and macro fear, offering a prime panic-aisle entry. Buying full size ($25,000 notional, 25% of equity at cost) [1.2].\n2. MSFT Position Management (P4): MSFT remains in portfolio at $390.34 (+0.1% vs fill) [book]. Per P4, registering a standing stop order at $389.18 to strictly guarantee automatic exit if a new low is printed within 10 sessions.",
+     "actions": "- Initiated BUY order for PLTR: $25,000 notional USD at snapshot price $124.57 [1.2]. Thesis: P1 structural test pass on 40% drawdown despite +85% YoY Q1 growth and record FY26 guidance raise [1.2, 1.5]. Invalidation: Print below $123.00 (new low within 10 sessions) or US commercial growth decelerating below 50% YoY. Review by 2026-08-06.\n- Registered standing stop order for MSFT: sell at trigger price $389.18 per P4 hard stop rule [book]."
+    },
+    {
      "date": "2026-07-22",
      "type": "trade",
      "title": "Bootstrap: long MSFT, panic priced as a capex referendum, not a moat problem",
@@ -416,6 +451,7 @@
     {
      "id": "P1",
      "statement": "Buy quality down \u226520% only when the damage is non-structural \u2014 apply the written structural test before every entry",
+     "detail": "",
      "type": "entry",
      "rigidity": "hard",
      "scope": "all entries",
@@ -433,6 +469,7 @@
     {
      "id": "P2",
      "statement": "Panic is a price, not information \u2014 enter at full size while fear is peaking",
+     "detail": "",
      "type": "entry",
      "rigidity": "heuristic",
      "scope": "entry timing and sizing",
@@ -450,6 +487,7 @@
     {
      "id": "P3",
      "statement": "Bounces are rented, not owned \u2014 take profits at +15% or 30 sessions, whichever comes first",
+     "detail": "",
      "type": "exit",
      "rigidity": "heuristic",
      "scope": "all positions",
@@ -467,6 +505,7 @@
     {
      "id": "P4",
      "statement": "The thesis is wrong if the name makes a new low 10 sessions after entry \u2014 exit, no debate",
+     "detail": "",
      "type": "exit",
      "rigidity": "hard",
      "scope": "all positions",
@@ -484,6 +523,7 @@
     {
      "id": "P5",
      "statement": "Never average down into a falling knife \u2014 one entry per dislocation",
+     "detail": "",
      "type": "sizing",
      "rigidity": "hard",
      "scope": "adds",
@@ -526,7 +566,7 @@
    "n_principles": 5,
    "n_revisions": 0,
    "n_hyp_testing": 2,
-   "last_action": "Bootstrap: long MSFT, panic priced as a capex referendum, not a moat problem"
+   "last_action": "PLTR Dislocation Entry ($25,000 Notional); MSFT Standing Stop Registered"
   },
   {
    "id": "tempo",
@@ -543,7 +583,7 @@
    "cash_pct": 0.5026304974908354,
    "ret": -0.003243928689116604,
    "alpha": -0.0013739286891166769,
-   "max_dd": -0.0028709880999999715,
+   "max_dd": -0.0032439286891170482,
    "curve": [
     {
      "date": "Jul 22 19:10",
@@ -572,6 +612,10 @@
     {
      "date": "Jul 23 06:38",
      "v": 99.7129
+    },
+    {
+     "date": "Jul 23 07:34",
+     "v": 99.6756
     }
    ],
    "bench_curve": [
@@ -601,6 +645,10 @@
     },
     {
      "date": "Jul 23 06:38",
+     "v": 99.813
+    },
+    {
+     "date": "Jul 23 07:34",
      "v": 99.813
     }
    ],
@@ -697,6 +745,7 @@
     {
      "id": "P1",
      "statement": "Buy strength: enter only within 5% of the 52-week high on rising volume",
+     "detail": "",
      "type": "entry",
      "rigidity": "heuristic",
      "scope": "all entries",
@@ -714,6 +763,7 @@
     {
      "id": "P2",
      "statement": "Full intended size on entry \u2014 conviction does not scale in",
+     "detail": "",
      "type": "sizing",
      "rigidity": "heuristic",
      "scope": "all entries",
@@ -731,6 +781,7 @@
     {
      "id": "P3",
      "statement": "Trailing stop \u221210%, honored the same session, no exceptions",
+     "detail": "",
      "type": "exit",
      "rigidity": "hard",
      "scope": "all positions",
@@ -748,6 +799,7 @@
     {
      "id": "P4",
      "statement": "Correlated momentum is one position \u2014 cluster cap 40%",
+     "detail": "",
      "type": "sizing",
      "rigidity": "hard",
      "scope": "portfolio level",
@@ -765,6 +817,7 @@
     {
      "id": "P5",
      "statement": "No re-entry into a stopped name for 5 sessions \u2014 no revenge trades",
+     "detail": "",
      "type": "self",
      "rigidity": "hard",
      "scope": "after any stop-out",
@@ -824,7 +877,7 @@
    "cash_pct": 0.05548641338743998,
    "ret": -0.002455430073280307,
    "alpha": 0.0021735699267196873,
-   "max_dd": -0.003562901790370554,
+   "max_dd": -0.004379026623887783,
    "curve": [
     {
      "date": "Jul 22 19:10",
@@ -853,6 +906,10 @@
     {
      "date": "Jul 23 06:38",
      "v": 99.8362
+    },
+    {
+     "date": "Jul 23 07:34",
+     "v": 99.7545
     }
    ],
    "bench_curve": [
@@ -882,6 +939,10 @@
     },
     {
      "date": "Jul 23 06:38",
+     "v": 99.5371
+    },
+    {
+     "date": "Jul 23 07:34",
      "v": 99.5371
     }
    ],
@@ -939,6 +1000,13 @@
    ],
    "journal": [
     {
+     "date": "2026-07-23",
+     "type": "hold",
+     "title": "Displace AMZN for GOOGL post-earnings print (+82% Cloud growth); confirm AI Capex supercycle (H2 evidence)",
+     "rationale": "Re-underwriting AMZN vs GOOGL per Principle P1 (\"Leadership over laggard catch-up\") and Principle P5 (\"Re-underwrite every position every 2 weeks\"). AMZN was entered yesterday as a placeholder pending GOOGL's Q2 earnings print, with an explicit thesis invalidation trigger: displacement by a pure-play cloud growth leader post-earnings.\n\nGOOGL's print delivered unequivocal proof of leadership: Google Cloud revenue accelerated to +82% YoY ($24.8B), with operating margins expanding to 35.6% and backlog reaching $514B [2.6, 2.7]. This vastly outperforms AWS's ~19% YoY growth rate. Market concern over Alphabet's $44.9B Q2 CapEx ($195B\u2013$205B FY26 guidance) and temporary negative FCF caused a -1.46% pull-back to $342.09, offering an exceptional entry price for the dominant cloud growth compounder [1.4, 2.4].\n\nPer P4 (exit on thesis crack / invalidation), AMZN is exited in full (`qty: \"all\"`). The proceeds (~$20,035) plus available cash are reallocated into GOOGL ($34,500 notional, ~34.56% of equity at cost, strictly adhering to P2's 35% single-position cap).\n\nNVDA ($34,974 value, 35.03% equity) and TSM ($24,797 value, 24.84% equity) remain core high-conviction holdings. The massive CapEx raises from both Alphabet ($195B\u2013$205B) [1.4] and TSMC ($60B\u2013$64B) [3.1] strongly confirm the hardware supply chain demand for NVDA GPUs and TSMC N3/N2 leading-edge wafer capacity.",
+     "actions": "- Exited full position in AMZN (`qty: \"all\"`) per P4 invalidation condition.\n- Opened new long position in GOOGL ($34,500 notional) per P1 leadership thesis.\n- Logged evidence for Hypothesis H2 (`evidence_for: 1`)."
+    },
+    {
      "date": "2026-07-22",
      "type": "trade",
      "title": "Bootstrap: NVDA, TSM, AMZN \u2014 leadership in compute, foundry, and (with a caveat) cloud",
@@ -971,6 +1039,7 @@
     {
      "id": "P1",
      "statement": "Own the strongest name in the strongest theme \u2014 leadership over laggard catch-up stories",
+     "detail": "",
      "type": "entry",
      "rigidity": "heuristic",
      "scope": "all entries",
@@ -988,6 +1057,7 @@
     {
      "id": "P2",
      "statement": "Concentration is the point: 3\u20135 positions, sized like they matter",
+     "detail": "",
      "type": "sizing",
      "rigidity": "hard",
      "scope": "portfolio level",
@@ -1005,6 +1075,7 @@
     {
      "id": "P3",
      "statement": "Add on thesis confirmation, not on price dips",
+     "detail": "",
      "type": "sizing",
      "rigidity": "heuristic",
      "scope": "adds to existing positions",
@@ -1022,6 +1093,7 @@
     {
      "id": "P4",
      "statement": "Exit on thesis crack, not on price \u2014 pre-written invalidations are the only sell signal",
+     "detail": "",
      "type": "exit",
      "rigidity": "hard",
      "scope": "all positions",
@@ -1039,6 +1111,7 @@
     {
      "id": "P5",
      "statement": "Re-underwrite every position every 2 weeks as if buying it fresh today",
+     "detail": "",
      "type": "process",
      "rigidity": "heuristic",
      "scope": "portfolio review",
@@ -1081,7 +1154,7 @@
    "n_principles": 5,
    "n_revisions": 0,
    "n_hyp_testing": 2,
-   "last_action": "Bootstrap: NVDA, TSM, AMZN \u2014 leadership in compute, foundry, and (with a caveat) cloud"
+   "last_action": "Displace AMZN for GOOGL post-earnings print (+82% Cloud growth); confirm AI Capex supercycle (H2 evidence)"
   },
   {
    "id": "wildcat",
@@ -1097,7 +1170,7 @@
    "cash": 100000.0,
    "cash_pct": 1.0,
    "ret": 0.0,
-   "alpha": 0.0016559999999999908,
+   "alpha": 0.004118999999999984,
    "max_dd": 0.0,
    "curve": [
     {
@@ -1126,6 +1199,10 @@
     },
     {
      "date": "Jul 23 06:38",
+     "v": 100.0
+    },
+    {
+     "date": "Jul 23 07:34",
      "v": 100.0
     }
    ],
@@ -1157,6 +1234,10 @@
     {
      "date": "Jul 23 06:38",
      "v": 99.8344
+    },
+    {
+     "date": "Jul 23 07:34",
+     "v": 99.5881
     }
    ],
    "positions": [],
@@ -1166,9 +1247,16 @@
     {
      "date": "2026-07-23",
      "type": "hold",
-     "title": "07-23 \u2014 HOLD \u2014 Engine feeds restored; capital preserved as H1 and H2 conditions remain unfulfilled",
+     "title": "Engine feeds restored; capital preserved as H1 and H2 conditions remain unfulfilled",
      "rationale": "Following two consecutive sessions where external data paths returned blocked or stale feeds, the engine has delivered a clean, verified market snapshot for 2026-07-23. The book sits at 100% cash ($100,000.00).\n\nEvaluating active hypotheses against current live data:\n1. **H1 (Funding-Rate Resets Mark Local BTC Bottoms)**: Per VanEck [2], perp funding rates are low-positive (+4.5% annualized), not negative. H1 requires a negative funding rate reset to trigger a systematic entry signal. Status: **NOT TRIGGERED**.\n2. **H2 (Equity Vol Spikes are Crypto Buying Windows)**: Per Saxo Bank [1], VIX is holding at 18.65. H2 requires a VIX close above 25. Status: **NOT TRIGGERED**.\n\nEvaluating satellite equity dislocations:\nPLTR (-6.10%) and COIN (-5.53%) posted notable daily declines in today's snapshot. However, entering these high-beta equities immediately ahead of major Big Tech earnings disclosures (Alphabet, Tesla, Intel) without a structural thesis or VIX capitulation violates **P2** (\"Every entry needs a thesis a skeptic couldn't summarize as 'it was moving'\") and **P3** (\"Check daily, act rarely \u2014 boredom is not a signal\").\n\nPer **P4** (\"When you act, act at full intended size \u2014 no toe-dipping\") and **P5** (\"Respect the sizing floor before the upside case \u2014 survival is the strategy\"), capital deployment must be deliberate and conviction-driven. Deploying cash simply because clean engine feeds are back online would be impatience, not edge. We hold 100% cash ($100,000.00), preserving full firepower for an explicit H1/H2 trigger or clear post-earnings market dislocation.",
      "actions": "None. Cash remains $100,000.00. Equity remains $100,000.00. No positions opened."
+    },
+    {
+     "date": "2026-07-23",
+     "type": "hold",
+     "title": "VIX suppressed and funding rates positive; full cash preserved through megacap earnings and macro pressure",
+     "rationale": "The book sits at 100% cash ($100,000.00).\n\n1. **Hypothesis Evaluation**:\n   - **H1 (Funding-Rate Resets Mark Local BTC Bottoms)**: 30-day average BTC perp funding rates sit at +4.5% annualized [2.10]. While brief localized short squeezes occurred earlier in the week [2.3], no systematic negative funding rate reset has occurred. Status: **NOT TRIGGERED**.\n   - **H2 (Equity Vol Spikes are Crypto Buying Windows)**: VIX spot closed down at 17.05 (-8.6%) [1.11], remaining far below the VIX > 25 threshold required for H2. Status: **NOT TRIGGERED**.\n\n2. **Satellite & Equity Screening**:\n   - High-beta equities like COIN (-5.53%) and PLTR (-6.10%) sold off alongside broader tech weakness. However, megacap tech earnings disclosures (Alphabet's $45B capex drag and Tesla's EPS miss) alongside surging crude oil (USO +2.20%) and rising Treasury yields (4.63%) create macro headwinds.\n   - Per **P2** (\"Every entry needs a thesis a skeptic couldn't summarize as 'it was moving'\") and **P3** (\"Check daily, act rarely \u2014 boredom is not a signal\"), entering pullbacks without structural capitulation or systematic trigger events is noise-chasing, not edge.\n   - Per **P4** (\"When you act, act at full intended size \u2014 no toe-dipping\") and **P5** (\"Respect the sizing floor before the upside case \u2014 survival is the strategy\"), we maintain complete capital flexibility at 100% cash ($100,000.00).",
+     "actions": "None. Cash remains $100,000.00. Equity remains $100,000.00. No orders placed."
     },
     {
      "date": "2026-07-22",
@@ -1203,6 +1291,7 @@
     {
      "id": "P1",
      "statement": "Volatility is the fee for opportunity \u2014 judge the book on 90-day windows, act within them",
+     "detail": "",
      "type": "self",
      "rigidity": "heuristic",
      "scope": "self-evaluation and staying power",
@@ -1220,6 +1309,7 @@
     {
      "id": "P2",
      "statement": "Every entry needs a thesis a skeptic couldn't summarize as \"it was moving\"",
+     "detail": "",
      "type": "entry",
      "rigidity": "hard",
      "scope": "all entries",
@@ -1237,6 +1327,7 @@
     {
      "id": "P3",
      "statement": "Check daily, act rarely \u2014 boredom is not a signal",
+     "detail": "",
      "type": "self",
      "rigidity": "heuristic",
      "scope": "cadence",
@@ -1254,6 +1345,7 @@
     {
      "id": "P4",
      "statement": "When you act, act at full intended size \u2014 no toe-dipping",
+     "detail": "",
      "type": "sizing",
      "rigidity": "heuristic",
      "scope": "all entries",
@@ -1271,6 +1363,7 @@
     {
      "id": "P5",
      "statement": "Respect the sizing floor before the upside case \u2014 survival is the strategy",
+     "detail": "",
      "type": "sizing",
      "rigidity": "hard",
      "scope": "all sizing (see constitution caps)",
@@ -1313,11 +1406,11 @@
    "n_principles": 5,
    "n_revisions": 0,
    "n_hyp_testing": 2,
-   "last_action": "07-23 \u2014 HOLD \u2014 Engine feeds restored; capital preserved as H1 and H2 conditions remain unfulfilled"
+   "last_action": "Engine feeds restored; capital preserved as H1 and H2 conditions remain unfulfilled"
   }
  ],
  "system": {
-  "last_tick": "Jul 23 06:37",
+  "last_tick": "Jul 23 07:33",
   "symbols_tracked": 60,
   "total_cost_usd": 1.3794,
   "runs": [

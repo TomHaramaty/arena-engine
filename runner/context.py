@@ -30,6 +30,7 @@ End your final message with exactly one fenced json block:
 Rules:
 - Exactly ONE journal_entry op per run — always, even on a hold day.
 - place_order uses notional_usd (buys) or qty (sells); sells of a full position may pass "qty": "all".
+- Buys exceeding your caps or cash are CLIPPED to the constitutional maximum (noted on the fill); oversized sells are clipped to your position. Orders with no meaningful capacity are rejected.
 - Only symbols from your market snapshot (or a watchlist_request first — grants apply NEXT run).
 - Every buy needs thesis + invalidation + review_by.
 - Standing orders persist and are executed mechanically by the engine at hourly ticks — this is how hard stop rules are guaranteed.

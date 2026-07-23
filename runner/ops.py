@@ -108,20 +108,32 @@ def validate_and_apply(conn, agent, run_id, ops, dry=False):
                         record(op, "rejected", "buy needs positive notional_usd"); continue
                     if not (op.get("thesis") and op.get("invalidation") and op.get("review_by")):
                         record(op, "rejected", "buy needs thesis + invalidation + review_by"); continue
-                    fp = core.buy_fill_price(price)
-                    qty = notional / fp
-                    if notional > cash + 1e-6:
-                        record(op, "rejected", f"insufficient cash: need ${notional:,.0f}, have ${cash:,.0f}"); continue
+                    # The engine executes the constitutional maximum of the proposed
+                    # intent: oversized buys are CLIPPED to cap/cash (recorded), not voided.
                     held_val = _position_qty(conn, agent_id, sym) * price
-                    # constitution caps
+                    allowed, clip_reasons = notional, []
                     if sym in CRYPTO:
                         cap = cfg.get("crypto_core_cap_pct")
-                        if cap is not None and _crypto_value(conn, agent_id) + notional > cap * equity + 1e-6:
-                            record(op, "rejected", f"crypto core cap {cap:.0%} of equity breached"); continue
+                        if cap is not None:
+                            capacity = cap * equity - _crypto_value(conn, agent_id)
+                            if allowed > capacity:
+                                allowed = capacity; clip_reasons.append(f"crypto core cap {cap:.0%}")
                     else:
                         cap = cfg.get("max_single_equity_pct", cfg.get("max_single_pct"))
-                        if cap is not None and held_val + notional > cap * equity + 1e-6:
-                            record(op, "rejected", f"single-position cap {cap:.0%} of equity breached"); continue
+                        if cap is not None:
+                            capacity = cap * equity - held_val
+                            if allowed > capacity:
+                                allowed = capacity; clip_reasons.append(f"single-position cap {cap:.0%}")
+                    if allowed > cash:
+                        allowed = cash; clip_reasons.append("available cash")
+                    if allowed < min(500.0, notional):
+                        record(op, "rejected",
+                               f"no meaningful capacity: ${allowed:,.0f} left under " + ", ".join(clip_reasons)); continue
+                    clip_note = (f" (clipped from ${notional:,.0f} to ${allowed:,.0f} by "
+                                 + ", ".join(clip_reasons) + ")") if clip_reasons else ""
+                    notional = allowed
+                    fp = core.buy_fill_price(price)
+                    qty = notional / fp
                     if not dry:
                         row = conn.execute(
                             """insert into orders (agent_id, kind, side, symbol, qty, params, status, run_id, created_at, closed_at)
@@ -149,7 +161,7 @@ def validate_and_apply(conn, agent, run_id, ops, dry=False):
                             (notional, agent_id),
                         )
                     cash -= notional
-                    record(op, "accepted", f"filled {qty:.4f} {sym} @ {fp:.2f}")
+                    record(op, "accepted", f"filled {qty:.4f} {sym} @ {fp:.2f}{clip_note}")
 
                 else:  # sell
                     held = _position_qty(conn, agent_id, sym)

@@ -1,7 +1,7 @@
 name: daily-run
 on:
-  schedule:
-    - cron: "40 14,20 * * 1-5"   # 10:40 ET (post-open settle) and 16:40 ET (post-close), DST
+  # Fired by Cloud Scheduler (arena-daily-run: 40 14,20 * * 1-5 UTC) via workflow_dispatch.
+  # No GH cron: brain runs are not idempotent, so exactly one trigger source.
   workflow_dispatch: {}
 
 concurrency:

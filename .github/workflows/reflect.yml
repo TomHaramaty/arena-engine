@@ -1,7 +1,7 @@
 name: reflect
 on:
-  schedule:
-    - cron: "30 21 * * 5"   # Fridays, after the daily run — the weekly floor
+  # Fired by Cloud Scheduler (arena-reflect: 30 21 * * 5 UTC) via workflow_dispatch.
+  # No GH cron: reflection runs are not idempotent, so exactly one trigger source.
   workflow_dispatch: {}
 
 concurrency:

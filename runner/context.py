@@ -62,12 +62,14 @@ def market_snapshot(conn):
         """select distinct on (symbol) symbol, price, prev_close, ts
            from ticks order by symbol, ts desc"""
     ).fetchall()
-    lines = ["symbol | price | prev_close | chg%"]
+    lines = [f"{'SYMBOL':<10}{'PRICE':>14}{'PREV CLOSE':>14}{'CHANGE':>10}"]
     newest = None
     for r in rows:
         p, pc = float(r["price"]), float(r["prev_close"] or 0)
         chg = f"{(p / pc - 1) * 100:+.2f}%" if pc else "n/a"
-        lines.append(f"{r['symbol']} | {p} | {pc or 'n/a'} | {chg}")
+        lines.append(
+            f"{r['symbol']:<10}{p:>14,.2f}{(f'{pc:,.2f}' if pc else 'n/a'):>14}{chg:>10}"
+        )
         newest = max(newest, r["ts"]) if newest else r["ts"]
     return "\n".join(lines), newest
 

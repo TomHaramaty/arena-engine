@@ -176,6 +176,13 @@ def validate_and_apply(conn, agent, run_id, ops, dry=False):
                                 "delete from positions where agent_id=%s and symbol=%s",
                                 (agent_id, sym),
                             )
+                            # reflection-due marker (handled=true: not a wake request —
+                            # the agent just acted; this schedules its post-mortem)
+                            conn.execute(
+                                """insert into triggers_fired (agent_id, kind, details, handled)
+                                   values (%s,'position_closed',%s,true)""",
+                                (agent_id, json.dumps({"symbol": sym, "qty": qty, "fill_price": fp})),
+                            )
                         else:
                             conn.execute(
                                 "update positions set qty=qty-%s where agent_id=%s and symbol=%s",

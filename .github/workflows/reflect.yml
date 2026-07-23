@@ -1,0 +1,58 @@
+name: reflect
+on:
+  schedule:
+    - cron: "30 21 * * 5"   # Fridays, after the daily run — the weekly floor
+  workflow_dispatch: {}
+
+concurrency:
+  group: brains
+  cancel-in-progress: false
+
+jobs:
+  reflect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q "psycopg[binary]" requests
+      - name: Setup SSH + clone trader-arena
+        env:
+          TRADER_SSH_KEY: ${{ secrets.TRADER_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$TRADER_SSH_KEY" > ~/.ssh/trader_key && chmod 600 ~/.ssh/trader_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/trader_key -o IdentitiesOnly=yes" \
+            git clone -q --branch claude/arena git@github.com:TomHaramaty/trader-arena.git trader
+          git -C trader config user.name "arena-bot"
+          git -C trader config user.email "arena-bot@users.noreply.github.com"
+      - name: Run due reflections
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TRADER_REPO: ${{ github.workspace }}/trader
+          GIT_SSH_COMMAND: ssh -i ~/.ssh/trader_key -o IdentitiesOnly=yes
+        run: python -m jobs.reflect_run --due
+      - name: Build and deploy interface
+        if: always()
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          PAGES_DEPLOY_KEY: ${{ secrets.PAGES_DEPLOY_KEY }}
+          TRADER_REPO: ${{ github.workspace }}/trader
+        run: |
+          echo "$PAGES_DEPLOY_KEY" > ~/.ssh/pages_key && chmod 600 ~/.ssh/pages_key
+          python -m jobs.site
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/pages_key -o IdentitiesOnly=yes" \
+            git clone -q git@github.com:TomHaramaty/trader-arena-live.git pub
+          find pub -maxdepth 1 -mindepth 1 ! -name '.git' ! -name 'README.md' -exec rm -rf {} +
+          cp -r site/* pub/ && touch pub/.nojekyll
+          cd pub
+          git config user.name "arena-bot" && git config user.email "arena-bot@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && echo "no site changes" || {
+            git commit -q -m "interface: post-reflection refresh"
+            GIT_SSH_COMMAND="ssh -i ~/.ssh/pages_key -o IdentitiesOnly=yes" git push -q
+          }

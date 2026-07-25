@@ -37,9 +37,16 @@ def main():
         trigger = "event"
     else:
         slot = daily_slot()
+        # Seated agents run once per market day: if the principal rang the
+        # first bell today (jobs/agent_run --trigger first-bell), the close
+        # slot skips them rather than running the newborn twice on day one.
         rows = conn.execute(
-            """select id from agents where status='active'
+            """select id from agents a where status='active'
                and (coalesce(tier,'house') <> 'seated' or %s = 'close')
+               and not (coalesce(tier,'house') = 'seated' and exists (
+                 select 1 from runs r where r.agent_id = a.id
+                   and r.trigger = 'first-bell'
+                   and r.started::date = current_date))
                order by id""",
             (slot,),
         ).fetchall()

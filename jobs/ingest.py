@@ -18,6 +18,8 @@ seating resumes cleanly).
 import json
 import os
 import pathlib
+
+from engine import observability as obs
 import subprocess
 import sys
 import traceback
@@ -167,6 +169,7 @@ def process(conn, doc, today):
 
 
 def main():
+    obs.init("ingest")
     check = "--check" in sys.argv
     fs = fs_client()
     docs = submitted_applications(fs)

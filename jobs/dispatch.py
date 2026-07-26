@@ -15,6 +15,7 @@ import traceback
 from datetime import datetime, timezone
 
 from engine import db
+from engine import observability as obs
 from jobs.agent_run import run_agent
 
 
@@ -26,6 +27,7 @@ def daily_slot():
 
 
 def main():
+    obs.init("dispatch")
     triggers_only = "--triggers-only" in sys.argv
     conn = db.connect()
     if triggers_only:

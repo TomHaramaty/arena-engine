@@ -1,9 +1,16 @@
 """Hourly tick: fetch quotes → ticks; evaluate standing orders; mark portfolios;
 detect triggers. Independent of any brain run."""
 from engine import core, db, marketdata
+from engine import observability as obs
 
 
 def main():
+    obs.init("tick")
+    with obs.cron("engine-tick", "7,37 * * * *"):
+        _tick()
+
+
+def _tick():
     conn = db.connect()
     db.migrate(conn)
 

@@ -10,6 +10,7 @@ import re
 from datetime import datetime, timezone
 
 from engine import db
+from engine import observability as obs
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TRADER = pathlib.Path(os.environ.get("TRADER_REPO", "/Users/tomharamaty/trader"))
@@ -255,6 +256,7 @@ def system_block(conn):
 
 
 def main():
+    obs.init("site")
     conn = db.connect()
     agents_rows = conn.execute(
         "select * from agents where status='active' order by id"

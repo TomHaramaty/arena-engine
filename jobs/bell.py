@@ -11,9 +11,11 @@ Usage:
 import sys
 
 from jobs.ingest import fs_client
+from engine import observability as obs
 
 
 def main():
+    obs.init("bell")
     app_id, arg = sys.argv[1], sys.argv[2]
     fs = fs_client()
     ref = fs.collection("applications").document(app_id)

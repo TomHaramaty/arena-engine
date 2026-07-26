@@ -9,6 +9,7 @@ import sys
 from datetime import datetime, timezone
 
 from engine import db
+from engine import observability as obs
 from runner import context, reflect
 
 REFLECT_KINDS = ("position_closed", "stop_filled", "drawdown")
@@ -77,6 +78,7 @@ def reflect_agent(conn, agent_id):
 
 
 def main():
+    obs.init("reflect")
     conn = db.connect()
     if "--due" in sys.argv:
         agents = due_agents(conn)

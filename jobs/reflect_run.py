@@ -77,14 +77,7 @@ def reflect_agent(conn, agent_id):
     print(f"[{agent_id}] reflection complete — changes: {summary or ['none — evidence recorded only']}")
 
 
-def main():
-    obs.init("reflect")
-    conn = db.connect()
-    if "--due" in sys.argv:
-        agents = due_agents(conn)
-        print(f"due for reflection: {agents or 'none'}")
-    else:
-        agents = [a for a in sys.argv[1:] if not a.startswith("--")]
+def _run(conn, agents):
     failures = 0
     for aid in agents:
         try:
@@ -97,6 +90,30 @@ def main():
             traceback.print_exc()
     if failures:
         raise SystemExit(1)
+
+
+def main():
+    obs.init("reflect")
+    conn = db.connect()
+    if "--due" in sys.argv:
+        # --due is idempotent: a completed reflection advances
+        # last_reflection_ts, so the week floor and event window both close.
+        # Duplicate Friday triggers (Cloud Scheduler 21:30 + GH cron 21:45)
+        # therefore no-op. Only Friday runs check in to the cron monitor —
+        # a manual --due on another day would otherwise log off-window.
+        if datetime.now(timezone.utc).weekday() == 4:
+            with obs.cron("engine-reflect", "30 21 * * 5",
+                          checkin_margin=20, max_runtime=60,
+                          failure_issue_threshold=1):
+                agents = due_agents(conn)
+                print(f"due for reflection: {agents or 'none'}")
+                _run(conn, agents)
+            return
+        agents = due_agents(conn)
+        print(f"due for reflection: {agents or 'none'}")
+    else:
+        agents = [a for a in sys.argv[1:] if not a.startswith("--")]
+    _run(conn, agents)
 
 
 if __name__ == "__main__":

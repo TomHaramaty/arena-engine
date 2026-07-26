@@ -41,12 +41,16 @@ def init(component):
 
 
 @contextlib.contextmanager
-def cron(monitor_slug, crontab):
+def cron(monitor_slug, crontab, checkin_margin=10, max_runtime=15,
+         failure_issue_threshold=2):
     """Wrap a scheduled job in a Sentry Cron check-in.
 
-    Upserts the monitor from code (no dashboard setup) and configures it to
-    alert only after two consecutive missed/failed windows, so an
-    over-provisioned schedule's self-healing blips stay quiet.
+    Upserts the monitor from code (no dashboard setup). The defaults suit an
+    over-provisioned schedule like tick — alert only after two consecutive
+    bad windows, so self-healing blips stay quiet. Jobs whose triggers are
+    already redundant (daily-run, reflect) pass failure_issue_threshold=1:
+    there a missed window means every trigger failed, and one lost window is
+    a lost market day — page immediately.
     """
     if not _ready:
         yield
@@ -55,9 +59,9 @@ def cron(monitor_slug, crontab):
     monitor_config = {
         "schedule": {"type": "crontab", "value": crontab},
         "timezone": "UTC",
-        "checkin_margin": 10,           # minutes late allowed before "missed"
-        "max_runtime": 15,              # minutes before "timed out"
-        "failure_issue_threshold": 2,   # two bad windows in a row before an issue
+        "checkin_margin": checkin_margin,   # minutes late allowed before "missed"
+        "max_runtime": max_runtime,         # minutes before "timed out"
+        "failure_issue_threshold": failure_issue_threshold,
         "recovery_threshold": 1,
     }
     with monitor(monitor_slug=monitor_slug, monitor_config=monitor_config):

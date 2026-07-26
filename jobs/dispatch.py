@@ -4,10 +4,12 @@
   python -m jobs.dispatch --triggers-only  # only agents with unhandled triggers
 One agent's failure never blocks the others.
 
-Cadence tiers: house agents run both daily slots; seated (interview-born)
-agents run once daily, at the close slot only. The slot comes from DAILY_SLOT
-('open'|'close', set by the workflow) or is inferred from the clock — the two
-Cloud Scheduler dispatches fire at 14:40 UTC (open) and 20:40 UTC (close).
+All active agents run both daily slots. The slot comes from DAILY_SLOT
+('open'|'close', set by the workflow) or is inferred from the clock — the
+Cloud Scheduler dispatches fire at 14:40 UTC (open) and 20:40 UTC (close),
+and a GitHub cron backup fires at :50. Duplicate triggers are safe: an agent
+that already has a scheduled run this slot today is skipped, so the backup
+is a no-op whenever the primary fired.
 """
 import os
 import sys
@@ -26,9 +28,7 @@ def daily_slot():
     return "open" if datetime.now(timezone.utc).hour < 17 else "close"
 
 
-def main():
-    obs.init("dispatch")
-    triggers_only = "--triggers-only" in sys.argv
+def dispatch(triggers_only):
     conn = db.connect()
     if triggers_only:
         rows = conn.execute(
@@ -39,12 +39,22 @@ def main():
         trigger = "event"
     else:
         slot = daily_slot()
-        # Seated agents run once per market day: if the principal rang the
-        # first bell today (jobs/agent_run --trigger first-bell), the close
-        # slot skips them rather than running the newborn twice on day one.
+        # Two guards make duplicate triggers harmless:
+        # - already-ran: skip any agent with a scheduled run this slot today
+        #   (a crashed 'started' run also counts — brain runs are not
+        #   idempotent, so a partial run must not be blindly re-fired; its
+        #   failure reaches Sentry instead).
+        # - first-bell: if the principal rang the first bell today
+        #   (jobs/agent_run --trigger first-bell), later slots skip the
+        #   newborn rather than running it twice on day one.
         rows = conn.execute(
             """select id from agents a where status='active'
-               and (coalesce(tier,'house') <> 'seated' or %s = 'close')
+               and not exists (
+                 select 1 from runs r where r.agent_id = a.id
+                   and r.trigger = 'scheduled'
+                   and (r.started at time zone 'utc')::date = current_date
+                   and (case when extract(hour from r.started at time zone 'utc') < 17
+                        then 'open' else 'close' end) = %s)
                and not (coalesce(tier,'house') = 'seated' and exists (
                  select 1 from runs r where r.agent_id = a.id
                    and r.trigger = 'first-bell'
@@ -69,6 +79,19 @@ def main():
     print(f"dispatch done: {len(rows) - failures}/{len(rows)} succeeded")
     if failures:
         raise SystemExit(1)
+
+
+def main():
+    obs.init("dispatch")
+    triggers_only = "--triggers-only" in sys.argv
+    if triggers_only:
+        dispatch(triggers_only=True)
+        return
+    # threshold=1: the trigger is already redundant (Cloud Scheduler + GH cron
+    # backup), so a missed window means both failed — a lost market slot.
+    with obs.cron("engine-daily-run", "40 14,20 * * 1-5",
+                  checkin_margin=15, max_runtime=120, failure_issue_threshold=1):
+        dispatch(triggers_only=False)
 
 
 if __name__ == "__main__":

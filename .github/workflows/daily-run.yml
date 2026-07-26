@@ -1,10 +1,13 @@
 name: daily-run
 on:
-  # Fired by Cloud Scheduler (arena-daily-run: 40 14,20 * * 1-5 UTC) via workflow_dispatch.
-  # No GH cron: brain runs are not idempotent, so exactly one trigger source.
-  # Slot tiers: 14:40 UTC = 'open' (house agents only), 20:40 = 'close' (all
-  # agents — seated tier runs once daily here). Inferred from the UTC hour by
-  # jobs/dispatch.py when the slot input is blank.
+  # Primary: Cloud Scheduler (arena-daily-run: 40 14,20 * * 1-5 UTC) via
+  # workflow_dispatch. Backup: GH cron 10 min later — safe to double-fire
+  # because jobs/dispatch.py skips agents that already ran this slot today,
+  # so the backup no-ops whenever the primary fired. All active agents run
+  # both slots; the slot is inferred from the UTC hour when the input is
+  # blank (schedule events have no inputs): <17:00 = 'open', else 'close'.
+  schedule:
+    - cron: "50 14,20 * * 1-5"
   workflow_dispatch:
     inputs:
       slot:

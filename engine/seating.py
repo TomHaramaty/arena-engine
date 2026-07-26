@@ -14,6 +14,14 @@ NAME_RE = re.compile(r"^[a-z][a-z0-9-]{2,11}$")
 SYMBOL_RE = re.compile(r"[A-Z0-9.\-]{1,12}")
 MAX_POSITION_CEILING = 35.0
 P_TYPES = {"entry", "exit", "sizing", "risk", "process", "self"}
+# The avatar kit's valid values — must mirror web/static/avatar.js in arena-web.
+# The four small values that render an agent's "Member" portrait everywhere.
+AVATAR_BASES = {"fox", "owl", "bear", "cat", "frog", "bull", "wolf", "ram",
+                "hare", "shark", "hawk", "stag", "penguin", "octopus"}
+AVATAR_COSTUMES = {"suit", "gilet", "professor", "pit", "hoodie", "banker"}
+AVATAR_DETAILS = {"none", "monocle", "rounds", "aviators", "tophat", "visor", "headset"}
+AVATAR_COLORS = 8  # index 0..7 into the palette
+DEFAULT_AVATAR = {"base": "fox", "color": 0, "costume": "suit", "acc": "none"}
 SCOPE_BY_TYPE = {
     "entry": "all entries", "exit": "all exits", "sizing": "all sizing",
     "risk": "all positions", "process": "process", "self": "self",
@@ -70,6 +78,24 @@ def _parse_date(s):
         return datetime.strptime(str(s), "%Y-%m-%d").date()
     except (TypeError, ValueError):
         return None
+
+
+def _avatar(a):
+    """Sanitize the untrusted avatar packet to the four valid values, falling
+    back to the default for anything unrecognized. Never rejects a seat — a bad
+    avatar just means the house default face."""
+    a = a if isinstance(a, dict) else {}
+    base = str(a.get("base") or "").strip().lower()
+    costume = str(a.get("costume") or "").strip().lower()
+    acc = str(a.get("acc") or "").strip().lower()
+    color = a.get("color")
+    color = int(color) if isinstance(color, (int, float)) and not isinstance(color, bool) else -1
+    return {
+        "base": base if base in AVATAR_BASES else DEFAULT_AVATAR["base"],
+        "color": color if 0 <= color < AVATAR_COLORS else DEFAULT_AVATAR["color"],
+        "costume": costume if costume in AVATAR_COSTUMES else DEFAULT_AVATAR["costume"],
+        "acc": acc if acc in AVATAR_DETAILS else DEFAULT_AVATAR["acc"],
+    }
 
 
 # ---------- validation ----------
@@ -184,6 +210,7 @@ def validate_packet(packet, taken_ids, has_live_agent, listed_symbols, today=Non
         "principles": principles,
         "hypotheses": hypotheses,
         "voice": _line(packet.get("voice"), 300) or "plain, first-person, keeps score honestly",
+        "avatar": _avatar(packet.get("avatar")),
         "transcript_privacy": privacy if privacy in ("full", "excerpts") else "excerpts",
         "transcript": _text(packet.get("transcript")),
     }

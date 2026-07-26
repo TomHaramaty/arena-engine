@@ -16,12 +16,31 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 TRADER = pathlib.Path(os.environ.get("TRADER_REPO", "/Users/tomharamaty/trader"))
 INITIAL = 100000.0
 
+# The house agents predate the interview picker, so their avatars are assigned
+# here — a distinct Member each, matching avatar.js's kit. Seated (interview-born)
+# agents carry their own avatar in agents.config; this default only covers house.
 META = {
-    "tempo":    {"cadence": "Daily", "universe": "US large-caps + sector ETFs",   "color": "var(--s2)"},
-    "catalyst": {"cadence": "Daily", "universe": "US stocks w/ datable catalyst", "color": "var(--s1)"},
-    "vertex":   {"cadence": "Daily", "universe": "Secular-growth large/mid caps", "color": "var(--s3)"},
-    "maverick": {"cadence": "Daily", "universe": "Quality names ≥20% off highs",  "color": "var(--s5)"},
-    "wildcat":  {"cadence": "Daily + self-chosen", "universe": "Equities/ETFs + BTC/ETH", "color": "var(--s4)"},
+    "tempo":    {"cadence": "Daily", "universe": "US large-caps + sector ETFs",   "color": "var(--s2)",
+                 "avatar": {"base": "hawk", "color": 4, "costume": "gilet", "acc": "aviators"}},
+    "catalyst": {"cadence": "Daily", "universe": "US stocks w/ datable catalyst", "color": "var(--s1)",
+                 "avatar": {"base": "fox", "color": 0, "costume": "suit", "acc": "none"}},
+    "vertex":   {"cadence": "Daily", "universe": "Secular-growth large/mid caps", "color": "var(--s3)",
+                 "avatar": {"base": "owl", "color": 3, "costume": "professor", "acc": "rounds"}},
+    "maverick": {"cadence": "Daily", "universe": "Quality names ≥20% off highs",  "color": "var(--s5)",
+                 "avatar": {"base": "bull", "color": 1, "costume": "pit", "acc": "visor"}},
+    "wildcat":  {"cadence": "Daily + self-chosen", "universe": "Equities/ETFs + BTC/ETH", "color": "var(--s4)",
+                 "avatar": {"base": "shark", "color": 2, "costume": "hoodie", "acc": "headset"}},
+}
+# Avatar body hexes — PALS[i][0] in avatar.js. A seated agent's chart line uses
+# its own colour so line and portrait agree; house agents keep their var(--sN).
+AVATAR_PALETTE = ["#e0684b", "#d19a3f", "#3f9a8f", "#8b6fc9",
+                  "#5b7fc0", "#d67aa8", "#7a9a3f", "#7f8a99"]
+DEFAULT_AVATAR = {"base": "fox", "color": 0, "costume": "suit", "acc": "none"}
+# Seated agents chartered before the avatar picker shipped — their config holds
+# no avatar, so their face is assigned here once. ballast keeps its Violet
+# tincture (palette index 3). New seated agents never need an entry.
+AVATAR_BACKFILL = {
+    "ballast": {"base": "bear", "color": 3, "costume": "banker", "acc": "monocle"},
 }
 BENCH_LABEL = {("SPY",): "SPY", ("QQQ",): "QQQ", ("SPY", "BTC-USD"): "50/50 SPY·BTC"}
 
@@ -188,11 +207,19 @@ def build_agent(conn, row, prices):
     journal = parse_journal(d)
     meta = META.get(aid, {})
 
+    # the four avatar values ride on agents.config for seated agents; house
+    # agents get theirs from META. A seated agent's chart line takes its own
+    # avatar colour so line and portrait agree.
+    cfg = row["config"] if isinstance(row["config"], dict) else {}
+    avatar = cfg.get("avatar") if isinstance(cfg.get("avatar"), dict) else None
+    avatar = avatar or meta.get("avatar") or AVATAR_BACKFILL.get(aid) or DEFAULT_AVATAR
+    color = meta.get("color") or AVATAR_PALETTE[avatar["color"] % len(AVATAR_PALETTE)]
+
     return {
         "id": aid, "name": row["name"], "archetype": row["archetype"],
         "brain": row["brain"],
         "cadence": meta.get("cadence", "Daily"), "universe": meta.get("universe", ""),
-        "color": meta.get("color", "var(--s1)"),
+        "color": color, "avatar": avatar,
         "launched": str(st["launched"] or ""),
         "benchmark_label": BENCH_LABEL.get(bench_syms, "/".join(bench_syms)),
         "equity": equity, "cash": cash, "cash_pct": cash / equity if equity else 0,

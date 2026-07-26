@@ -82,7 +82,8 @@ def seat(conn, cleaned, uid, app_id, today):
     # crypto_core_cap_pct mirrors the principal's cap: ops.py checks crypto
     # buys only against the crypto sleeve cap, so without it BTC/ETH buys
     # would be uncapped for seated agents.
-    config = {"max_single_pct": frac, "crypto_core_cap_pct": frac}
+    config = {"max_single_pct": frac, "crypto_core_cap_pct": frac,
+              "avatar": cleaned.get("avatar") or seating.DEFAULT_AVATAR}
     conn.execute(
         """insert into agents (id, name, archetype, brain, config, status, tier, owner_uid)
            values (%s,%s,%s,%s,%s,'active','seated',%s)

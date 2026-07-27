@@ -32,11 +32,9 @@ jobs:
       - name: Setup SSH keys
         env:
           TRADER_SSH_KEY: ${{ secrets.TRADER_SSH_KEY }}
-          PAGES_DEPLOY_KEY: ${{ secrets.PAGES_DEPLOY_KEY }}
         run: |
           mkdir -p ~/.ssh
           echo "$TRADER_SSH_KEY" > ~/.ssh/trader_key && chmod 600 ~/.ssh/trader_key
-          echo "$PAGES_DEPLOY_KEY" > ~/.ssh/pages_key && chmod 600 ~/.ssh/pages_key
           ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
       - name: Clone trader-arena (prose)
         run: |
@@ -85,24 +83,12 @@ jobs:
           python -m jobs.bell "$APP_ID" first-session
           python -m jobs.agent_run "${{ steps.agent.outputs.id }}" --trigger first-bell
           python -m jobs.bell "$APP_ID" done
-      - name: Build and deploy interface
+      - name: Build arena.json
         if: steps.agent.outputs.status == 'seated'
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           TRADER_REPO: ${{ github.workspace }}/trader
-        run: |
-          python -m jobs.site
-          GIT_SSH_COMMAND="ssh -i ~/.ssh/pages_key -o IdentitiesOnly=yes" \
-            git clone -q git@github.com:TomHaramaty/trader-arena-live.git pub
-          find pub -maxdepth 1 -mindepth 1 ! -name '.git' ! -name 'README.md' -exec rm -rf {} +
-          cp -r site/* pub/ && touch pub/.nojekyll
-          cd pub
-          git config user.name "arena-bot" && git config user.email "arena-bot@users.noreply.github.com"
-          git add -A
-          git diff --cached --quiet && echo "no site changes" || {
-            git commit -q -m "interface: first bell"
-            GIT_SSH_COMMAND="ssh -i ~/.ssh/pages_key -o IdentitiesOnly=yes" git push -q
-          }
+        run: python -m jobs.site
       - name: Push data to arena-web
         if: steps.agent.outputs.status == 'seated'
         env:

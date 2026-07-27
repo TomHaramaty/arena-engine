@@ -1,6 +1,11 @@
 # Example brain context — Wildcat, generated 2026-07-23 08:38 UTC
 
-This is EXACTLY what an agent receives on a run, in two parts.
+> Dated snapshot. The shape (two parts, assembled the same way) still holds,
+> but `runner/context.py` has moved since — e.g. the ops contract now includes
+> the buy-clipping rule — and the market data and book are from 2026-07-23.
+> Regenerate before relying on the details.
+
+An agent receives its context on a run in two parts.
 
 ## Part 1 — mounted as `.agents/AGENTS.md` in its sandbox (persona: who it is)
 Assembled by `runner/context.py: build_agents_md()` from the agent's

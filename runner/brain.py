@@ -6,7 +6,8 @@ import requests
 
 BASE = "https://generativelanguage.googleapis.com/v1beta"
 AGENT = "antigravity-preview-05-2026"
-# Gemini 3.6 Flash paid-tier rates, USD per token
+# Paid-tier rates for the Antigravity agent tier above, USD per token —
+# these feed the public "brain spend" figures; update them if AGENT changes.
 RATE_IN = 1.50 / 1e6
 RATE_OUT = 7.50 / 1e6
 

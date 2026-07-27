@@ -22,6 +22,13 @@ AVATAR_COSTUMES = {"suit", "gilet", "professor", "pit", "hoodie", "banker"}
 AVATAR_DETAILS = {"none", "monocle", "rounds", "aviators", "tophat", "visor", "headset"}
 AVATAR_COLORS = 8  # index 0..7 into the palette
 DEFAULT_AVATAR = {"base": "fox", "color": 0, "costume": "suit", "acc": "none"}
+
+# The updates preference from the review screen: how often the principal wants
+# the agent writing to them once letters ship, and whether letters carry a
+# floor section. Stored in agents.config; consumed by the dispatch job when it
+# exists. Nothing is sent until then.
+UPDATE_CADENCES = {"daily", "weekly", "off"}
+DEFAULT_UPDATES = {"cadence": "daily", "floor_digest": True}
 SCOPE_BY_TYPE = {
     "entry": "all entries", "exit": "all exits", "sizing": "all sizing",
     "risk": "all positions", "process": "process", "self": "self",
@@ -123,6 +130,18 @@ def _avatar(a):
         "color": color if 0 <= color < AVATAR_COLORS else DEFAULT_AVATAR["color"],
         "costume": costume if costume in AVATAR_COSTUMES else DEFAULT_AVATAR["costume"],
         "acc": acc if acc in AVATAR_DETAILS else DEFAULT_AVATAR["acc"],
+    }
+
+
+def _updates(u):
+    """Sanitize the updates preference to the closed vocabulary, falling back
+    to the defaults. Never rejects a seat — a bad preference just means the
+    house default."""
+    u = u if isinstance(u, dict) else {}
+    cadence = str(u.get("cadence") or "").strip().lower()
+    return {
+        "cadence": cadence if cadence in UPDATE_CADENCES else DEFAULT_UPDATES["cadence"],
+        "floor_digest": u.get("floor_digest") is not False,
     }
 
 
@@ -250,7 +269,10 @@ def validate_packet(packet, taken_ids, has_live_agent, listed_symbols, today=Non
         "principles": principles,
         "hypotheses": hypotheses,
         "voice": _line(packet.get("voice"), 300) or "plain, first-person, keeps score honestly",
+        "research": _line(packet.get("research"), 400),
+        "horizon": _line(packet.get("horizon"), 120),
         "avatar": _avatar(packet.get("avatar")),
+        "updates": _updates(packet.get("updates")),
         "transcript_privacy": privacy if privacy in ("full", "excerpts") else "excerpts",
         "transcript": _text(packet.get("transcript")),
     }
@@ -311,6 +333,13 @@ def harness_md(c, today):
         f"Benchmark: {bench['label']} ({', '.join(bench['symbols'])}).",
         "Reflection triggers: arena defaults.",
     ]
+    # Desk preferences from the interview — steering, not law. They sit in
+    # front of the brain at every deliberation; reflection may sharpen them
+    # into principles but the harness lines themselves carry no rigidity.
+    if c.get("research"):
+        params.append(f"Research: {c['research']}")
+    if c.get("horizon"):
+        params.append(f"Horizon: {c['horizon']}")
     return (
         f"# {c['name']} — harness\n\n"
         f"## Identity\n{identity}\n\n"

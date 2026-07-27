@@ -318,3 +318,47 @@ def test_class_ceilings_default_to_zero_and_respect_the_arena_ceiling():
     packet["class_pct"] = {"crypto": "lots", "inverse_levered": True}
     cleaned, _ = validate(packet)
     assert cleaned["class_pct"] == {"crypto": 0.0, "inverse_levered": 0.0}
+
+
+# ---------- desk preferences and the updates card ----------
+
+
+def test_desk_preferences_reach_the_harness(tmp_path):
+    packet = copy.deepcopy(PACKET)
+    packet["research"] = "Documents first — filings and the print; sentiment is noise until it is a number."
+    packet["horizon"] = "Weeks to months — a thesis gets room to play out."
+    cleaned, reasons = validate(packet)
+    assert reasons == []
+    seating.write_seed_files(tmp_path, cleaned, TODAY, "app-doc-5")
+    text = (tmp_path / "agents" / "calla" / "harness.md").read_text()
+    assert "- Research: Documents first" in text
+    assert "- Horizon: Weeks to months" in text
+
+
+def test_desk_preferences_are_optional(tmp_path):
+    """An interview that never reached the desk still seats — the harness
+    simply carries no research or horizon line."""
+    cleaned, reasons = validate(copy.deepcopy(PACKET))
+    assert reasons == []
+    assert cleaned["research"] == ""
+    assert cleaned["horizon"] == ""
+    seating.write_seed_files(tmp_path, cleaned, TODAY, "app-doc-6")
+    text = (tmp_path / "agents" / "calla" / "harness.md").read_text()
+    assert "- Research:" not in text
+    assert "- Horizon:" not in text
+
+
+def test_updates_preference_sanitizes_to_closed_vocabulary():
+    packet = copy.deepcopy(PACKET)
+    packet["updates"] = {"cadence": "weekly", "floor_digest": False}
+    cleaned, _ = validate(packet)
+    assert cleaned["updates"] == {"cadence": "weekly", "floor_digest": False}
+
+    packet["updates"] = {"cadence": "hourly", "floor_digest": "sure"}
+    cleaned, _ = validate(packet)
+    assert cleaned["updates"] == seating.DEFAULT_UPDATES
+
+    for garbage in (None, "daily", 7, ["weekly"]):
+        packet["updates"] = garbage
+        cleaned, _ = validate(packet)
+        assert cleaned["updates"] == seating.DEFAULT_UPDATES

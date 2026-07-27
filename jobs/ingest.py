@@ -87,7 +87,8 @@ def seat(conn, cleaned, uid, app_id, today):
     config = {"max_single_pct": frac,
               "class_caps": {cls: round(pct / 100, 4)
                              for cls, pct in class_pct.items()},
-              "avatar": cleaned.get("avatar") or seating.DEFAULT_AVATAR}
+              "avatar": cleaned.get("avatar") or seating.DEFAULT_AVATAR,
+              "updates": cleaned.get("updates") or seating.DEFAULT_UPDATES}
     conn.execute(
         """insert into agents (id, name, archetype, brain, config, status, tier, owner_uid)
            values (%s,%s,%s,%s,%s,'active','seated',%s)

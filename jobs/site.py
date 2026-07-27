@@ -54,8 +54,9 @@ def read(p):
 
 def harness_universe(path):
     """Universe chip for seated agents: the harness constitution's own
-    universe line, up to the em-dash that starts the watchlist boilerplate."""
-    m = re.search(r"(?m)^- Universe:\s*(.+?)\s*—", read(path))
+    universe line, up to the em-dash or sentence break that starts the
+    watchlist boilerplate (deduped harnesses use a plain sentence)."""
+    m = re.search(r"(?m)^- Universe:\s*(.+?)\s*(?:—|\.(?:\s|$)|$)", read(path))
     return m.group(1).strip().rstrip(".") if m else ""
 
 
@@ -172,6 +173,29 @@ def tlabel(ts):
     return ts.strftime("%b %d %H:%M")
 
 
+def arena_curve(conn):
+    """Equal-weight arena index across all agents, chain-linked so agents that
+    join mid-history enter at the index level of their first mark instead of
+    distorting it: each interval the index moves by the mean per-agent return
+    of every agent marked at both ends. Points carry epoch `t` for the floor's
+    range controls."""
+    rows = conn.execute(
+        "select ts, agent_id, equity from equity_marks order by ts"
+    ).fetchall()
+    by_ts = {}
+    for r in rows:
+        by_ts.setdefault(r["ts"], {})[r["agent_id"]] = float(r["equity"])
+    idx, prev, out = 100.0, {}, []
+    for ts in sorted(by_ts):
+        cur = by_ts[ts]
+        rets = [cur[a] / prev[a] - 1 for a in cur if a in prev and prev[a]]
+        if rets:
+            idx *= 1 + sum(rets) / len(rets)
+        prev.update(cur)
+        out.append({"t": int(ts.timestamp()), "date": tlabel(ts), "v": round(idx, 4)})
+    return out
+
+
 def build_agent(conn, row, prices):
     aid = row["id"]
     st = conn.execute("select * from agent_state where agent_id=%s", (aid,)).fetchone()
@@ -205,8 +229,10 @@ def build_agent(conn, row, prices):
     for p in pos_out:
         p["weight"] = p["value"] / equity if equity else 0
 
-    curve = [{"date": tlabel(m["ts"]), "v": round(float(m["equity"]) / INITIAL * 100, 4)} for m in marks]
-    bench_curve = [{"date": tlabel(m["ts"]), "v": float(m["bench_index"])} for m in marks if m["bench_index"] is not None]
+    curve = [{"t": int(m["ts"].timestamp()), "date": tlabel(m["ts"]),
+              "v": round(float(m["equity"]) / INITIAL * 100, 4)} for m in marks]
+    bench_curve = [{"t": int(m["ts"].timestamp()), "date": tlabel(m["ts"]),
+                    "v": float(m["bench_index"])} for m in marks if m["bench_index"] is not None]
     bench_syms = tuple(st["bench"]["symbols"])
     bidx = bench_curve[-1]["v"] if bench_curve else 100.0
     ret = equity / INITIAL - 1
@@ -236,7 +262,12 @@ def build_agent(conn, row, prices):
         "equity": equity, "cash": cash, "cash_pct": cash / equity if equity else 0,
         "ret": ret, "alpha": ret - (bidx / 100 - 1),
         "max_dd": max_drawdown([float(m["equity"]) for m in marks] or [equity]),
-        "curve": curve or [{"date": str(st["launched"] or ""), "v": round(equity / INITIAL * 100, 4)}],
+        "curve": curve or [{
+            # launched is a date; a newborn's lone point sits at its launch day
+            **({"t": int(datetime.combine(st["launched"], datetime.min.time(),
+                                          tzinfo=timezone.utc).timestamp()),
+                "date": st["launched"].strftime("%b %d")} if st["launched"] else {"date": ""}),
+            "v": round(equity / INITIAL * 100, 4)}],
         "bench_curve": bench_curve,
         "positions": pos_out,
         "standing_orders": [
@@ -310,6 +341,7 @@ def main():
         "run_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         "initial_capital": INITIAL,
         "agents": [build_agent(conn, r, prices) for r in agents_rows],
+        "arena_curve": arena_curve(conn),
         "system": system_block(conn),
     }
     site = ROOT / "site"

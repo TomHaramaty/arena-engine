@@ -3,9 +3,7 @@ import json
 import re
 from datetime import datetime, timezone
 
-from engine import core
-
-CRYPTO = {"BTC-USD", "ETH-USD"}
+from engine import core, marketdata
 
 
 class OpsParseError(Exception):
@@ -49,33 +47,18 @@ def _watchlisted(conn, symbol):
     )
 
 
-def _crypto_value(conn, agent_id):
-    total = 0.0
-    for sym in CRYPTO:
-        q = _position_qty(conn, agent_id, sym)
-        if q:
-            total += q * (_latest_price(conn, sym) or 0)
-    return total
-
-
-def validate_and_apply(conn, agent, run_id, ops, dry=False):
+def validate_and_apply(conn, agent, run_id, ops, dry=False, resolver=None):
     """Returns list of (op, verdict, reason). Applies accepted mutating ops
-    unless dry. agent: row with id, config. Journal handling is the caller's."""
+    unless dry. agent: row with id, config. Journal handling is the caller's.
+    resolver: symbol -> resolution dict (see marketdata.resolve); injectable so
+    tests never touch the network."""
+    resolver = resolver or marketdata.resolve
     agent_id, cfg = agent["id"], agent["config"] or {}
     now = datetime.now(timezone.utc)
     results = []
 
-    st = conn.execute(
-        "select cash from agent_state where agent_id=%s", (agent_id,)
-    ).fetchone()
-    cash = float(st["cash"])
-    # equity for cap math
-    pos = conn.execute(
-        "select symbol, qty from positions where agent_id=%s", (agent_id,)
-    ).fetchall()
-    equity = cash + sum(
-        float(p["qty"]) * (_latest_price(conn, p["symbol"]) or 0) for p in pos
-    )
+    # Cap math reads the book fresh per operation (core.buy_allowance), so a
+    # batch that buys twice cannot spend the same capacity twice.
 
     def record(op, verdict, reason=None):
         results.append((op, verdict, reason))
@@ -110,22 +93,8 @@ def validate_and_apply(conn, agent, run_id, ops, dry=False):
                         record(op, "rejected", "buy needs thesis + invalidation + review_by"); continue
                     # The engine executes the constitutional maximum of the proposed
                     # intent: oversized buys are CLIPPED to cap/cash (recorded), not voided.
-                    held_val = _position_qty(conn, agent_id, sym) * price
-                    allowed, clip_reasons = notional, []
-                    if sym in CRYPTO:
-                        cap = cfg.get("crypto_core_cap_pct")
-                        if cap is not None:
-                            capacity = cap * equity - _crypto_value(conn, agent_id)
-                            if allowed > capacity:
-                                allowed = capacity; clip_reasons.append(f"crypto core cap {cap:.0%}")
-                    else:
-                        cap = cfg.get("max_single_equity_pct", cfg.get("max_single_pct"))
-                        if cap is not None:
-                            capacity = cap * equity - held_val
-                            if allowed > capacity:
-                                allowed = capacity; clip_reasons.append(f"single-position cap {cap:.0%}")
-                    if allowed > cash:
-                        allowed = cash; clip_reasons.append("available cash")
+                    allowed, clip_reasons = core.buy_allowance(
+                        conn, agent_id, cfg, sym, notional)
                     if allowed < min(500.0, notional):
                         record(op, "rejected",
                                f"no meaningful capacity: ${allowed:,.0f} left under " + ", ".join(clip_reasons)); continue
@@ -160,7 +129,6 @@ def validate_and_apply(conn, agent, run_id, ops, dry=False):
                             "update agent_state set cash=cash-%s where agent_id=%s",
                             (notional, agent_id),
                         )
-                    cash -= notional
                     record(op, "accepted", f"filled {qty:.4f} {sym} @ {fp:.2f}{clip_note}")
 
                 else:  # sell
@@ -204,7 +172,6 @@ def validate_and_apply(conn, agent, run_id, ops, dry=False):
                             "update agent_state set cash=cash+%s where agent_id=%s",
                             (proceeds, agent_id),
                         )
-                    cash += proceeds
                     record(op, "accepted", f"sold {qty:.4f} {sym} @ {fp:.2f}")
 
             elif t == "register_standing_order":
@@ -215,7 +182,13 @@ def validate_and_apply(conn, agent, run_id, ops, dry=False):
                     record(op, "rejected", f"{sym} not on watchlist"); continue
                 price = _latest_price(conn, sym)
                 params = {}
+                # Default side by kind: a trailing stop only ever protects; a
+                # plain stop or limit can open or close, so it must say which.
                 side = op.get("side") or ("sell" if kind != "limit" else "buy")
+                if side not in ("buy", "sell"):
+                    record(op, "rejected", "side must be buy or sell"); continue
+                if kind == "trailing_stop" and side != "sell":
+                    record(op, "rejected", "trailing_stop is a sell-side protection"); continue
                 if kind == "stop":
                     if not op.get("trigger_price"):
                         record(op, "rejected", "stop needs trigger_price"); continue
@@ -228,10 +201,23 @@ def validate_and_apply(conn, agent, run_id, ops, dry=False):
                     if not op.get("limit_price"):
                         record(op, "rejected", "limit needs limit_price"); continue
                     params["limit_price"] = float(op["limit_price"])
-                    if side == "buy" and not op.get("qty"):
-                        record(op, "rejected", "limit buy needs qty"); continue
-                if side == "sell" and _position_qty(conn, agent_id, sym) <= 0:
-                    record(op, "rejected", "no position to protect (long-only)"); continue
+                if side == "buy":
+                    # Buys size in notional like every other buy; qty is still
+                    # accepted. Capacity is checked at trigger, not here.
+                    notional = float(op.get("notional_usd") or 0)
+                    if notional > 0:
+                        params["notional_usd"] = notional
+                    elif not op.get("qty"):
+                        record(op, "rejected",
+                               f"{kind} buy needs notional_usd (or qty)"); continue
+                    if op.get("thesis"):
+                        params["thesis"] = op["thesis"]
+                elif _position_qty(conn, agent_id, sym) <= 0:
+                    record(op, "rejected", "no position to sell (long-only, no shorts)"); continue
+                # An order whose trigger is already through the market is a
+                # market order with extra steps — accept it, but say so.
+                immediate = price is not None and core.triggered(
+                    kind, side, params, price)
                 if not dry:
                     conn.execute(
                         """insert into orders (agent_id, kind, side, symbol, qty, params, reason, run_id)
@@ -240,7 +226,9 @@ def validate_and_apply(conn, agent, run_id, ops, dry=False):
                          None if op.get("qty") in ("all", None) else float(op["qty"]),
                          json.dumps(params), op.get("note", ""), run_id),
                     )
-                record(op, "accepted")
+                record(op, "accepted",
+                       f"already through the market at {price:,.2f} — fills at the next tick"
+                       if immediate else None)
 
             elif t == "cancel_order":
                 oid = op.get("order_id")
@@ -265,20 +253,47 @@ def validate_and_apply(conn, agent, run_id, ops, dry=False):
                 if not sym or not re.fullmatch(r"[A-Z0-9.\-]{1,12}", sym):
                     record(op, "rejected", "invalid symbol"); continue
                 if _watchlisted(conn, sym):
-                    record(op, "accepted", "already on watchlist")
-                else:
-                    if not dry:
-                        conn.execute(
-                            """insert into watchlist (symbol, source_symbol, requested_by, status)
-                               values (%s,%s,%s,'active') on conflict do nothing""",
-                            (sym, sym, agent_id),
-                        )
-                        conn.execute(
-                            """insert into triggers_fired (agent_id, kind, details)
-                               values (%s,'watchlist_granted',%s)""",
-                            (agent_id, json.dumps({"symbol": sym})),
-                        )
-                    record(op, "accepted", "granted — quotes start next tick")
+                    record(op, "accepted", "already on watchlist"); continue
+                # Resolve before granting: the symbol must actually quote, and
+                # we must store the source symbol it quotes under (SOL-USD ->
+                # BINANCE:SOLUSDT). A grant that never quotes is worse than a
+                # rejection — it reads as permission and gives none.
+                try:
+                    r = resolver(sym)
+                except marketdata.QuoteError as e:
+                    # "We could not ask" is not "the answer is no". Say which.
+                    record(op, "rejected",
+                           f"could not reach the data source to resolve {sym} ({e}) — "
+                           "this is not a verdict on the symbol; request it again")
+                    continue
+                if not r:
+                    record(op, "rejected",
+                           f"{sym} does not resolve to a quotable instrument — the arena "
+                           "prices US-listed equities, ADRs and ETFs, and major crypto "
+                           "pairs; not forex, foreign listings, indices or options")
+                    continue
+                if not dry:
+                    conn.execute(
+                        """insert into watchlist (symbol, source_symbol, asset_class,
+                                                  description, requested_by, status)
+                           values (%s,%s,%s,%s,%s,'active') on conflict do nothing""",
+                        (sym, r["source_symbol"], r["asset_class"],
+                         r["description"], agent_id),
+                    )
+                    # Seed the resolving quote as a tick so the symbol is
+                    # tradable in THIS run: a grant an agent cannot act on for
+                    # another six hours is a grant no brain spends an op on.
+                    core.insert_ticks(conn, {sym: r["quote"]})
+                    conn.execute(
+                        """insert into triggers_fired (agent_id, kind, details, handled)
+                           values (%s,'watchlist_granted',%s,true)""",
+                        (agent_id, json.dumps(
+                            {"symbol": sym, "source_symbol": r["source_symbol"],
+                             "asset_class": r["asset_class"]})),
+                    )
+                record(op, "accepted",
+                       f"granted — {r['description']} ({r['asset_class']}) @ "
+                       f"{r['quote']['price']:,.2f}; tradable now, this run")
 
             else:
                 record(op, "rejected", f"unknown op type {t}")

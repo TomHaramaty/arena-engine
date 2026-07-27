@@ -33,6 +33,12 @@ create table if not exists watchlist (
   added_at timestamptz not null default now()
 );
 
+-- open universe (2026-07-27): symbols are resolved against the data source
+-- before they are granted, and carry the asset class that per-agent class caps
+-- are enforced against. equity | etf | inverse_levered | crypto.
+alter table watchlist add column if not exists asset_class text not null default 'equity';
+alter table watchlist add column if not exists description text;
+
 create table if not exists ticks (
   id bigserial primary key,
   symbol text not null,

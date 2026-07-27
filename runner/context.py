@@ -20,7 +20,7 @@ End your final message with exactly one fenced json block:
 {"operations": [
   {"type": "journal_entry", "title": "<one line>", "body_markdown": "<your full journal entry: ## Data used / ## Rationale / ## Actions / ## Hypothesis observations>"},
   {"type": "place_order", "side": "buy|sell", "symbol": "TICKER", "notional_usd": 20000, "thesis": "<why + what would prove you wrong>", "invalidation": "<explicit condition>", "review_by": "YYYY-MM-DD"},
-  {"type": "register_standing_order", "kind": "stop|trailing_stop|limit", "side": "sell|buy", "symbol": "TICKER", "qty": null, "trigger_price": 0, "trail_pct": 0.10, "limit_price": 0, "note": "<which principle mandates this>"},
+  {"type": "register_standing_order", "kind": "stop|trailing_stop|limit", "side": "sell|buy", "symbol": "TICKER", "qty": null, "notional_usd": 20000, "trigger_price": 0, "trail_pct": 0.10, "limit_price": 0, "note": "<which principle mandates this>"},
   {"type": "cancel_order", "order_id": 123, "note": "..."},
   {"type": "hypothesis_op", "op": "update_evidence|propose|falsify|promote|expire", "id": "H1", "evidence_for": 0, "evidence_against": 0, "note": "..."},
   {"type": "watchlist_request", "symbol": "TICKER", "note": "<why you need it>"}
@@ -31,9 +31,15 @@ Rules:
 - Exactly ONE journal_entry op per run — always, even on a hold day.
 - place_order uses notional_usd (buys) or qty (sells); sells of a full position may pass "qty": "all".
 - Buys exceeding your caps or cash are CLIPPED to the constitutional maximum (noted on the fill); oversized sells are clipped to your position. Orders with no meaningful capacity are rejected.
-- Only symbols from your market snapshot (or a watchlist_request first — grants apply NEXT run).
+- The market snapshot is what the arena is quoting right now — it is NOT the limit of what you may trade. Anything US-listed (equities, ADRs, ETFs) and any major crypto pair can be added with watchlist_request: the engine resolves it, prices it immediately, and it becomes tradable **in this same run**, so you may request a symbol and place an order for it in one operations block. Unquotable requests (forex, foreign listings, indices, options, typos) are rejected with a reason. If your thesis names an instrument the snapshot lacks, ask for it — do not settle for the nearest listed proxy.
 - Every buy needs thesis + invalidation + review_by.
-- Standing orders persist and are executed mechanically by the engine at hourly ticks — this is how hard stop rules are guaranteed.
+- Standing orders persist and are executed mechanically by the engine at hourly ticks — this is how hard stop rules are guaranteed, and how you act between runs. Four shapes:
+  · stop + sell (trigger_price) — cut a loser below the market
+  · trailing_stop + sell (trail_pct) — ride a winner, exit on a give-back from its high
+  · limit + buy (limit_price + notional_usd) — bid below the market
+  · limit + sell (limit_price) — take profit above the market
+  · stop + buy (trigger_price + notional_usd) — enter on strength, above the market
+  Buy-side standing orders are checked against your caps at the moment they trigger, not when you register them, and are clipped to what your constitution allows then.
 - Integrity: cite research sources in the journal; never invent data; decision quality is judged against what was knowable now.
 """
 
@@ -130,7 +136,8 @@ def build_task(conn, agent_id):
     return (
         f"Run your trading day. Now: {now:%Y-%m-%d %H:%M} UTC.\n\n"
         f"## Market snapshot (engine prices as of {snap_ts:%Y-%m-%d %H:%M} UTC — "
-        f"fills will execute near these)\n{snap}\n\n"
+        f"fills will execute near these; this is what is quoted now, not the "
+        f"universe you are confined to — see watchlist_request)\n{snap}\n\n"
         f"## Your book\n{pf}\n\n"
         f"## Events since your last run (engine triggers)\n{trig_txt}\n\n"
         f"## Your recent journal\n{recent_journal(agent_id)}\n\n"

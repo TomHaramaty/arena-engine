@@ -79,10 +79,14 @@ def seat(conn, cleaned, uid, app_id, today):
              "weights": [round(1.0 / len(syms), 6)] * len(syms),
              "launch_prices": []}  # stamped at first bell (core.bootstrap_launches)
     frac = round(cleaned["max_position_pct"] / 100, 4)
-    # crypto_core_cap_pct mirrors the principal's cap: ops.py checks crypto
-    # buys only against the crypto sleeve cap, so without it BTC/ETH buys
-    # would be uncapped for seated agents.
-    config = {"max_single_pct": frac, "crypto_core_cap_pct": frac,
+    # Class ceilings come from the interview, not from the position cap. The
+    # old code mirrored max_position_pct into crypto_core_cap_pct, which handed
+    # every seated agent a crypto sleeve its principal was never asked about;
+    # an unasked market is now simply 0 (engine/core.DEFAULT_CLASS_CAPS).
+    class_pct = cleaned.get("class_pct") or {}
+    config = {"max_single_pct": frac,
+              "class_caps": {cls: round(pct / 100, 4)
+                             for cls, pct in class_pct.items()},
               "avatar": cleaned.get("avatar") or seating.DEFAULT_AVATAR}
     conn.execute(
         """insert into agents (id, name, archetype, brain, config, status, tier, owner_uid)

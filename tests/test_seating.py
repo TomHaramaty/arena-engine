@@ -198,9 +198,13 @@ def test_harness_embeds_floor_and_principal_limits(tmp_path):
                     "## Parameters"):
         assert section in text
     # arena floor, always present
-    assert "Long-only. No leverage, no derivatives" in text
-    assert "arena watchlist symbols only" in text
-    assert "watchlist requests" in text
+    assert "Long-only, cash-settled" in text
+    assert "No margin, no borrowing, no shorting, no options, no futures" in text
+    assert "anything the arena can price" in text
+    assert "requested by the agent and granted if they resolve" in text
+    # a market the interview did not charter is denied, not silently open
+    assert "Crypto: not permitted. [principal-set]" in text
+    assert "Inverse and leveraged ETFs: not permitted." in text
     assert "written thesis with invalidation conditions" in text
     assert "Simulated fills only, per arena protocol." in text
     # principal-set pieces
@@ -222,6 +226,7 @@ def test_harness_dedupes_echoed_floor_rules(tmp_path):
         "Max single position at most 25 percent of equity.",
         "Every position carries a written thesis with an invalidation condition.",
         "All fills are simulated at arena prices, with costs applied.",
+        "No inverse or leveraged ETFs, ever.",
         "Never touch pre-revenue companies.",
     ]
     cleaned, reasons = validate(packet)
@@ -230,6 +235,7 @@ def test_harness_dedupes_echoed_floor_rules(tmp_path):
     text = (tmp_path / "agents" / "calla" / "harness.md").read_text()
     assert text.count("Long-only") == 1
     assert text.count("Universe:") == 1
+    assert text.count("Inverse and leveraged ETFs") == 1
     assert text.count("thesis") == 1
     assert text.count("simulated") + text.count("Simulated") == 1
     assert "at most 25 percent" not in text
@@ -282,3 +288,33 @@ def test_armory_never_reassigns_and_exhausts_to_none(tmp_path):
     assert seating.assign_tincture(path, "eleventh", TODAY) is None
     data_after = json.loads(path.read_text())
     assert data_before["pairs"] == data_after["pairs"]  # append-only, untouched
+
+
+def test_class_ceilings_render_from_the_interview(tmp_path):
+    packet = copy.deepcopy(PACKET)
+    packet["class_pct"] = {"crypto": 20, "inverse_levered": 10}
+    cleaned, reasons = validate(packet)
+    assert reasons == []
+    assert cleaned["class_pct"] == {"crypto": 20.0, "inverse_levered": 10.0}
+    seating.write_seed_files(tmp_path, cleaned, TODAY, "app-doc-4")
+    text = (tmp_path / "agents" / "calla" / "harness.md").read_text()
+    assert "Crypto (spot, via the arena's pairs): max 20% of equity. [principal-set]" in text
+    assert "Inverse and leveraged ETFs: max 10% of equity" in text
+    assert "not permitted" not in text
+
+
+def test_class_ceilings_default_to_zero_and_respect_the_arena_ceiling():
+    """An unasked market is denied, and no principal may charter a sleeve
+    larger than the arena's own ceiling."""
+    cleaned, _ = validate(copy.deepcopy(PACKET))
+    assert cleaned["class_pct"] == {"crypto": 0.0, "inverse_levered": 0.0}
+
+    packet = copy.deepcopy(PACKET)
+    packet["class_pct"] = {"crypto": 90, "inverse_levered": -5}
+    cleaned, _ = validate(packet)
+    assert cleaned["class_pct"]["crypto"] == seating.MAX_POSITION_CEILING
+    assert cleaned["class_pct"]["inverse_levered"] == 0.0
+
+    packet["class_pct"] = {"crypto": "lots", "inverse_levered": True}
+    cleaned, _ = validate(packet)
+    assert cleaned["class_pct"] == {"crypto": 0.0, "inverse_levered": 0.0}

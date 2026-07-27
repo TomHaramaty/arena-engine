@@ -13,31 +13,57 @@ UNIVERSE = (
     "SPY QQQ IWM ACWI DIA XLK XLF XLE XLV XLY XLP XLI XLU SMH XBI AAPL MSFT "
     "NVDA GOOGL AMZN META TSLA AVGO AMD MU TSM ORCL PLTR COIN HOOD CRWD SNOW "
     "NFLX UBER SHOP JPM GS V MA XOM CVX LLY UNH JNJ PFE MRK KO PG WMT COST "
-    "HD CAT BA TLT IEF GLD SLV USO"
+    "HD CAT BA TLT IEF GLD SLV USO "
+    # 2026-07-27 scope amendment. The universe is open — any quotable symbol is
+    # one watchlist_request away — but what a newborn sees at its first bell is
+    # still this list, and it was 60 names of mega-cap tech and sector ETFs.
+    # Completing the sector set:
+    "XLC XLRE XLB "
+    # the rest of the cap range, and themes the charters already name — Vertex
+    # asked for a computational-biology name on 2026-07-22 and there was none:
+    "RXRX TEM IONQ NET DDOG ANET VRT "
+    # international exposure, reachable only through US listings on this plan:
+    "EWJ EFA FXI EEM "
+    # rates, credit and commodities — the macro half of the tape:
+    "SHY LQD HYG DBC UNG "
+    # crypto beyond the two majors, and its listed proxies:
+    "SOL-USD IBIT MSTR "
+    # the instruments that make a bearish or levered view expressible at all;
+    # capped by class per agent (engine/core.DEFAULT_CLASS_CAPS), 0% for anyone
+    # whose charter does not name them:
+    "SH PSQ SQQQ TQQQ SOXL SOXS"
 ).split()
 CRYPTO = {"BTC-USD": "BINANCE:BTCUSDT", "ETH-USD": "BINANCE:ETHUSDT"}
+
+# class_caps: the 2026-07-27 scope amendment granted the five house agents a
+# uniform 15% inverse/leveraged sleeve (see each harness.md's Amendments
+# section). Crypto is absent for the four equity-only charters, which the engine
+# reads as a 0% ceiling — an unnamed class is forbidden, not unlimited.
+SLEEVE = {"inverse_levered": 0.15}
 
 AGENTS = {
     "tempo": {
         "name": "Tempo", "archetype": "Momentum rider", "brain": "antigravity-gemini",
-        "config": {"max_single_pct": 0.25, "cluster_cap_pct": 0.40},
+        "config": {"max_single_pct": 0.25, "cluster_cap_pct": 0.40, "class_caps": SLEEVE},
     },
     "catalyst": {
         "name": "Catalyst", "archetype": "Event-driven", "brain": "antigravity-gemini",
-        "config": {"max_single_pct": 0.20, "max_positions": 6},
+        "config": {"max_single_pct": 0.20, "max_positions": 6, "class_caps": SLEEVE},
     },
     "vertex": {
         "name": "Vertex", "archetype": "Concentrated growth", "brain": "antigravity-gemini",
-        "config": {"max_single_pct": 0.35, "min_positions": 3, "max_positions": 5},
+        "config": {"max_single_pct": 0.35, "min_positions": 3, "max_positions": 5,
+                   "class_caps": SLEEVE},
     },
     "maverick": {
         "name": "Maverick", "archetype": "Aggressive contrarian", "brain": "antigravity-gemini",
-        "config": {"max_single_pct": 0.25},
+        "config": {"max_single_pct": 0.25, "class_caps": SLEEVE},
     },
     "wildcat": {
         "name": "Wildcat", "archetype": "Cross-asset opportunist",
         "brain": "antigravity-gemini",  # v2 pilot
-        "config": {"crypto_core_cap_pct": 0.50, "max_single_equity_pct": 0.20},
+        "config": {"crypto_core_cap_pct": 0.50, "max_single_equity_pct": 0.20,
+                   "class_caps": SLEEVE},
     },
 }
 

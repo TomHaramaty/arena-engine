@@ -9,7 +9,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 
-from engine import db
+from engine import core, db
 from runner import brain, context, ops
 
 
@@ -79,6 +79,12 @@ def run_agent(conn, agent_id, trigger="scheduled", dry=False):
         )
         conn.commit()
         print(f"[{agent_id}] run {run_id} complete — journal committed, cost ${cost}")
+        # Marked handled above, so a dormancy flag filed now survives this run
+        # and stands until the reflection that answers it.
+        streak = core.flag_dormancy(conn, agent_id)
+        if streak:
+            print(f"[{agent_id}] DORMANT: {streak} sessions without an order "
+                  f"— reflection now due")
     else:
         print(f"[{agent_id}] DRY RUN — nothing applied. Journal preview:\n")
         print(journal_op.get("body_markdown", "")[:1500])

@@ -74,6 +74,63 @@ def last_reflection_ts(conn, agent_id):
     return r["launched"] or datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
+DORMANCY_CHARGE = """## WHY YOU ARE HERE: {n} sessions in a row, no order placed
+
+The engine filed this against you. You have deliberated {n} times since you last
+acted, and {verdict}. That is a position, and this reflection judges it exactly
+as it would judge a losing trade — against what was knowable at the time, not
+against the outcome.
+
+Answer these directly and in this order, in your findings:
+1. What condition are you waiting for, stated as a number? When did you last
+   check whether it has EVER occurred in the period you claim to trade?
+2. Is that condition reachable with the data this arena actually has? If a
+   hypothesis of yours depends on data you cannot get, it is not a hypothesis,
+   it is a wish — falsify it or replace it now rather than carrying it to
+   expiry.
+3. If your entry conditions are so rare that they have not fired once, the
+   rulebook is what is wrong, not the market. Amend the principle that gates
+   you, or state plainly and on the record why waiting is still correct and
+   what specifically would change your mind.
+
+Inaction requires as much justification as action. A well-argued case for cash
+is still a case that must be re-argued, not a standing exemption.
+
+"""
+
+
+def why_now(conn, agent_id, since):
+    """The triggers that made this reflection due. A reflection that does not
+    know why it was called reviews an empty trade list and finds nothing."""
+    rows = conn.execute(
+        """select kind, details from triggers_fired
+           where agent_id=%s and ts > %s order by ts""",
+        (agent_id, since),
+    ).fetchall()
+    if not rows:
+        return ""
+    out = ""
+    dormant = next((r for r in rows if r["kind"] == "dormant"), None)
+    if dormant:
+        n = (dormant["details"] or {}).get("sessions_without_orders", "several")
+        # Two different failures wear the same streak: never getting started,
+        # and never adjusting. Charging an agent with the wrong one invites it
+        # to answer the wrong question.
+        held = conn.execute(
+            "select count(*) c from positions where agent_id=%s", (agent_id,)
+        ).fetchone()["c"]
+        verdict = ("every time concluded in cash — you have never taken a "
+                   "position at all" if not held else
+                   f"every time left your {held} open position(s) exactly as "
+                   "they were: no add, no trim, no exit, no new name")
+        out += DORMANCY_CHARGE.format(n=n, verdict=verdict)
+    others = [r["kind"] for r in rows if r["kind"] != "dormant"]
+    if others:
+        out += ("## Engine events this period\n"
+                + "\n".join(f"- {k}" for k in others) + "\n\n")
+    return out
+
+
 def build_reflection_prompt(conn, agent_id):
     since = last_reflection_ts(conn, agent_id)
     d = context.TRADER_REPO / "agents" / agent_id
@@ -103,6 +160,7 @@ def build_reflection_prompt(conn, agent_id):
         f"{context.read(d / 'hypotheses.md')}\n\n"
         f"# REFLECTION — {datetime.now(timezone.utc):%Y-%m-%d}\n\n"
         f"This is your scheduled deep self-examination (period since {since}).\n\n"
+        f"{why_now(conn, agent_id, since)}"
         f"{RULES}\n\n"
         f"## Equity trajectory this period\n{eq_line}\n\n"
         f"## Closed trades this period (realized)\n"

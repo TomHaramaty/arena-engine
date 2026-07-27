@@ -33,7 +33,10 @@ _TICKERS = (
     "SPY QQQ IWM ACWI DIA XLK XLF XLE XLV XLY XLP XLI XLU SMH XBI AAPL MSFT "
     "NVDA GOOGL AMZN META TSLA AVGO AMD MU TSM ORCL PLTR COIN HOOD CRWD SNOW "
     "NFLX UBER SHOP JPM GS V MA XOM CVX LLY UNH JNJ PFE MRK KO PG WMT COST "
-    "HD CAT BA TLT IEF GLD SLV USO BTC ETH BTC-USD ETH-USD BTCUSD ETHUSD"
+    "HD CAT BA TLT IEF GLD SLV USO BTC ETH BTC-USD ETH-USD BTCUSD ETHUSD "
+    # 2026-07-27 universe broadening (jobs/seed.py UNIVERSE)
+    "XLC XLRE XLB RXRX TEM IONQ NET DDOG ANET VRT EWJ EFA FXI EEM SHY LQD "
+    "HYG DBC UNG SOL SOL-USD SOLUSD IBIT MSTR SH PSQ SQQQ TQQQ SOXL SOXS"
 ).split()
 RESERVED = (
     set(HOUSE_AGENTS)
@@ -44,9 +47,34 @@ RESERVED = (
 )
 
 # The arena floor: always present in a generated harness, whatever the packet says.
+#
+# Rewritten 2026-07-27 (design/market-scope-review-2026-07-27.md). The old line
+# read "Long-only. No leverage, no derivatives, no shorting." — which stopped
+# being true the moment listed inverse and leveraged ETFs were allowed. What
+# actually holds, and what the engine actually enforces, is bounded loss: every
+# position is bought outright with cash and the worst case is that it goes to
+# zero. A bearish or levered view is expressed by OWNING an instrument that
+# moves that way, never by borrowing, shorting or writing one.
 FLOOR_HEAD = [
-    "Long-only. No leverage, no derivatives, no shorting. Cash never negative.",
+    "Long-only, cash-settled: every position is bought outright and its worst "
+    "case is a total loss of what was paid. No margin, no borrowing, no "
+    "shorting, no options, no futures. Cash never negative.",
 ]
+# Class ceilings an agent is not chartered for are zero, not unlimited — see
+# engine/core.DEFAULT_CLASS_CAPS. These render the choice as a readable clause.
+CLASS_CLAUSES = {
+    "crypto": (
+        "Crypto (spot, via the arena's pairs): max {pct:g}% of equity.",
+        "Crypto: not permitted.",
+    ),
+    "inverse_levered": (
+        "Inverse and leveraged ETFs: max {pct:g}% of equity — these are the "
+        "only way to hold a bearish or levered view here, and they decay in "
+        "chop; they are not buy-and-hold instruments.",
+        "Inverse and leveraged ETFs: not permitted. A bearish view is "
+        "expressed by holding cash.",
+    ),
+}
 FLOOR_TAIL = [
     "Every position carries a written thesis with invalidation conditions.",
     "Simulated fills only, per arena protocol.",
@@ -137,6 +165,17 @@ def validate_packet(packet, taken_ids, has_live_agent, listed_symbols, today=Non
                        "floor; they never loosen it.")
         pct = None
 
+    # Class ceilings. Absent or unparseable reads as 0 — a market the interview
+    # did not put in the charter is one the agent does not trade. The arena
+    # ceiling binds these exactly as it binds the single-position cap.
+    class_pct = {}
+    raw_classes = packet.get("class_pct") if isinstance(packet.get("class_pct"), dict) else {}
+    for cls in CLASS_CLAUSES:
+        v = raw_classes.get(cls)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0:
+            v = 0.0
+        class_pct[cls] = min(float(v), MAX_POSITION_CEILING)
+
     bench = packet.get("benchmark") if isinstance(packet.get("benchmark"), dict) else {}
     raw_syms = bench.get("symbols") if isinstance(bench.get("symbols"), list) else []
     symbols = []
@@ -206,6 +245,7 @@ def validate_packet(packet, taken_ids, has_live_agent, listed_symbols, today=Non
         "benchmark": {"symbols": symbols,
                       "label": _line(bench.get("label"), 60) or "/".join(symbols)},
         "max_position_pct": float(pct) if pct is not None else None,
+        "class_pct": class_pct,
         "constitution": constitution,
         "principles": principles,
         "hypotheses": hypotheses,
@@ -227,8 +267,11 @@ def _restates_floor_rule(item):
     twice — or worse, twice with different words."""
     t = item.lower()
     return bool(
-        re.search(r"long[- ]only|no leverage|no short|no derivativ|cash never negative", t)
+        re.search(r"long[- ]only|no leverage|no short|no derivativ|no margin"
+                  r"|no borrow|no option|no future|cash never negative", t)
         or t.startswith("universe")
+        # the class ceilings are rendered from class_pct, never from prose
+        or re.search(r"invers|leverage[d]? etf|3x|2x|crypto|bitcoin|ethereum", t)
         or "quote sheet" in t or "watchlist" in t
         or re.search(r"max(imum)?\s+single\s+position|per\s?cent of equity|% of equity", t)
         or ("thesis" in t and "invalidation" in t)
@@ -237,11 +280,17 @@ def _restates_floor_rule(item):
 
 
 def harness_md(c, today):
+    class_pct = c.get("class_pct") or {}
     constitution = (
         FLOOR_HEAD
-        + [f"Universe: {c['universe']} — arena watchlist symbols only; "
-           "unlisted names go through watchlist requests."]
+        + [f"Universe: {c['universe']} — anything the arena can price: "
+           "US-listed equities, ADRs and ETFs, and major crypto pairs. Names "
+           "not yet quoted are requested by the agent and granted if they "
+           "resolve."]
         + [f"Max single position: {c['max_position_pct']:g}% of equity at cost. [principal-set]"]
+        + [(allowed.format(pct=class_pct.get(cls, 0)) if class_pct.get(cls, 0) else denied)
+           + " [principal-set]"
+           for cls, (allowed, denied) in CLASS_CLAUSES.items()]
         + [f"{item} [principal-set]" for item in c["constitution"]
            if not _restates_floor_rule(item)]
         + FLOOR_TAIL

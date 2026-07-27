@@ -156,6 +156,9 @@ def test_symbol_cap_follows_the_chartered_wording():
     wildcat = {"crypto_core_cap_pct": 0.5, "max_single_equity_pct": 0.2}
     assert core.symbol_cap(wildcat, "equity") == 0.2
     assert core.symbol_cap(wildcat, "etf") == 0.2
+    # a leveraged ETF is a listed fund bought outright — still an equity
+    # position in the sense the charter meant
+    assert core.symbol_cap(wildcat, "inverse_levered") == 0.2
     assert core.symbol_cap(wildcat, "crypto") is None
     fury = {"max_single_pct": 0.35, "crypto_core_cap_pct": 0.35}
     assert core.symbol_cap(fury, "equity") == 0.35

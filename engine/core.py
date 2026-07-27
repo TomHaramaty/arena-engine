@@ -95,14 +95,16 @@ def symbol_cap(cfg, asset_class):
     """The single-position ceiling that binds this symbol, or None.
 
     Two spellings, and the difference is chartered, not cosmetic:
-    `max_single_equity_pct` was written as "max single *equity* position" and
-    binds only equities and ETFs (Wildcat's crypto sleeve is governed by its
-    class cap alone); the unqualified `max_single_pct` binds every position.
+    `max_single_equity_pct` was written as "max single *equity* position", which
+    covers everything listed — plain shares, ETFs, and inverse or leveraged
+    ETFs, which are listed funds bought outright like any other. Only crypto
+    sits outside that wording (Wildcat's sleeve is governed by its class cap
+    alone). The unqualified `max_single_pct` binds every position.
     """
-    if asset_class in ("equity", "etf"):
-        cap = cfg.get("max_single_equity_pct", cfg.get("max_single_pct"))
-    else:
+    if asset_class == "crypto":
         cap = cfg.get("max_single_pct")
+    else:
+        cap = cfg.get("max_single_equity_pct", cfg.get("max_single_pct"))
     return None if cap is None else float(cap)
 
 

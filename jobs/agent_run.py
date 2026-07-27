@@ -60,6 +60,15 @@ def run_agent(conn, agent_id, trigger="scheduled", dry=False):
     for op, verdict, reason in results:
         print(f"  {verdict.upper():8s} {op.get('type'):24s} {reason or ''}")
 
+    # A note filed at the desk that this run did not answer stays pending and is
+    # put in front of the agent again next session — never silently dropped.
+    unanswered = [r["cid"] for r in conn.execute(
+        "select cid from guidance where agent_id=%s and disposition is null order by id",
+        (agent_id,)).fetchall()]
+    if unanswered:
+        print(f"[{agent_id}] GUIDANCE UNANSWERED: {', '.join(unanswered)} "
+              "— carried to the next session")
+
     journal_op = next(o for o, v, _ in results if o.get("type") == "journal_entry" and v == "accepted")
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     if not dry:

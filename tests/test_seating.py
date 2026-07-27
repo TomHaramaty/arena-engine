@@ -113,7 +113,7 @@ def test_benchmark_floor():
     _, reasons = validate({**PACKET, "benchmark": {"symbols": [], "label": "x"}})
     assert any("benchmark names no symbols" in r for r in reasons)
     _, reasons = validate({**PACKET, "benchmark": {"symbols": ["VTI"], "label": "VTI"}})
-    assert any("not on the arena quote sheet" in r for r in reasons)
+    assert any("not on the arena watchlist" in r for r in reasons)
     cleaned, reasons = validate(
         {**PACKET, "benchmark": {"symbols": ["spy", "btc-usd"], "label": "50/50"}})
     assert reasons == []
@@ -199,7 +199,7 @@ def test_harness_embeds_floor_and_principal_limits(tmp_path):
         assert section in text
     # arena floor, always present
     assert "Long-only. No leverage, no derivatives" in text
-    assert "arena quote sheet symbols only" in text
+    assert "arena watchlist symbols only" in text
     assert "watchlist requests" in text
     assert "written thesis with invalidation conditions" in text
     assert "Simulated fills only, per arena protocol." in text
@@ -208,6 +208,32 @@ def test_harness_embeds_floor_and_principal_limits(tmp_path):
     assert "Never average down into a losing position. [principal-set]" in text
     assert "Benchmark: SPY (SPY)." in text
     assert "skeptical, plain-spoken" in text
+
+
+def test_harness_dedupes_echoed_floor_rules(tmp_path):
+    # Interviews often hand back constitution clauses that restate the floor
+    # (long-only, universe, the cap, thesis, simulated fills). The harness must
+    # carry each law once — only genuinely principal-specific clauses survive.
+    packet = copy.deepcopy(PACKET)
+    packet["constitution"] = [
+        "Long-only. No leverage, no shorting, no derivatives.",
+        "Cash never negative.",
+        "Universe: US large caps, major ETFs, BTC and ETH.",
+        "Max single position at most 25 percent of equity.",
+        "Every position carries a written thesis with an invalidation condition.",
+        "All fills are simulated at arena prices, with costs applied.",
+        "Never touch pre-revenue companies.",
+    ]
+    cleaned, reasons = validate(packet)
+    assert reasons == []
+    seating.write_seed_files(tmp_path, cleaned, TODAY, "app-doc-3")
+    text = (tmp_path / "agents" / "calla" / "harness.md").read_text()
+    assert text.count("Long-only") == 1
+    assert text.count("Universe:") == 1
+    assert text.count("thesis") == 1
+    assert text.count("simulated") + text.count("Simulated") == 1
+    assert "at most 25 percent" not in text
+    assert "Never touch pre-revenue companies. [principal-set]" in text
 
 
 def test_interview_honors_privacy(tmp_path):

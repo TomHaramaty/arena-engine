@@ -1,4 +1,7 @@
-"""Build the public interface from DB state + git prose → site/ (arena.json + index.html).
+"""Build the public data payload from DB state + git prose → site/arena.json.
+
+The workflows push arena.json to the arena-web repo, whose deploy renders
+open-outcry.web.app from it. Nothing else is published.
 
 Usage: python -m jobs.site   (needs DATABASE_URL, TRADER_REPO)
 """
@@ -20,15 +23,15 @@ INITIAL = 100000.0
 # here — a distinct Member each, matching avatar.js's kit. Seated (interview-born)
 # agents carry their own avatar in agents.config; this default only covers house.
 META = {
-    "tempo":    {"cadence": "Daily", "universe": "US large-caps + sector ETFs",   "color": "var(--s2)",
+    "tempo":    {"cadence": "Twice daily", "universe": "US large-caps + sector ETFs",   "color": "var(--s2)",
                  "avatar": {"base": "hawk", "color": 4, "costume": "gilet", "acc": "aviators"}},
-    "catalyst": {"cadence": "Daily", "universe": "US stocks w/ datable catalyst", "color": "var(--s1)",
+    "catalyst": {"cadence": "Twice daily", "universe": "US stocks w/ datable catalyst", "color": "var(--s1)",
                  "avatar": {"base": "fox", "color": 0, "costume": "suit", "acc": "none"}},
-    "vertex":   {"cadence": "Daily", "universe": "Secular-growth large/mid caps", "color": "var(--s3)",
+    "vertex":   {"cadence": "Twice daily", "universe": "Secular-growth large/mid caps", "color": "var(--s3)",
                  "avatar": {"base": "owl", "color": 3, "costume": "professor", "acc": "rounds"}},
-    "maverick": {"cadence": "Daily", "universe": "Quality names ≥20% off highs",  "color": "var(--s5)",
+    "maverick": {"cadence": "Twice daily", "universe": "Quality names ≥20% off highs",  "color": "var(--s5)",
                  "avatar": {"base": "bull", "color": 1, "costume": "pit", "acc": "visor"}},
-    "wildcat":  {"cadence": "Daily + self-chosen", "universe": "Equities/ETFs + BTC/ETH", "color": "var(--s4)",
+    "wildcat":  {"cadence": "Twice daily + self-chosen", "universe": "Equities/ETFs + BTC/ETH", "color": "var(--s4)",
                  "avatar": {"base": "shark", "color": 2, "costume": "hoodie", "acc": "headset"}},
 }
 # Avatar body hexes — PALS[i][0] in avatar.js. A seated agent's chart line uses
@@ -47,6 +50,13 @@ BENCH_LABEL = {("SPY",): "SPY", ("QQQ",): "QQQ", ("SPY", "BTC-USD"): "50/50 SPY�
 
 def read(p):
     return p.read_text(encoding="utf-8") if p.exists() else ""
+
+
+def harness_universe(path):
+    """Universe chip for seated agents: the harness constitution's own
+    universe line, up to the em-dash that starts the watchlist boilerplate."""
+    m = re.search(r"(?m)^- Universe:\s*(.+?)\s*—", read(path))
+    return m.group(1).strip().rstrip(".") if m else ""
 
 
 def _ev(line):
@@ -218,7 +228,8 @@ def build_agent(conn, row, prices):
     return {
         "id": aid, "name": row["name"], "archetype": row["archetype"],
         "brain": row["brain"],
-        "cadence": meta.get("cadence", "Daily"), "universe": meta.get("universe", ""),
+        "cadence": meta.get("cadence", "Twice daily"),
+        "universe": meta.get("universe") or harness_universe(d / "harness.md"),
         "color": color, "avatar": avatar,
         "launched": str(st["launched"] or ""),
         "benchmark_label": BENCH_LABEL.get(bench_syms, "/".join(bench_syms)),
@@ -304,8 +315,6 @@ def main():
     site = ROOT / "site"
     site.mkdir(exist_ok=True)
     (site / "arena.json").write_text(json.dumps(data, indent=1))
-    template = (ROOT / "web" / "template.html").read_text()
-    (site / "index.html").write_text(template.replace("/*__ARENA_DATA__*/", json.dumps(data)))
     print(f"site built: {len(data['agents'])} agents, {len(data['system']['runs'])} runs, "
           f"total spend ${data['system']['total_cost_usd']:.2f}")
 

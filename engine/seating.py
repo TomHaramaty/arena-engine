@@ -104,7 +104,7 @@ def _avatar(a):
 def validate_packet(packet, taken_ids, has_live_agent, listed_symbols, today=None):
     """→ (cleaned, reasons). Seat iff reasons == []. Reasons are written in the
     Registrar's voice — they go verbatim onto the rejected application doc.
-    listed_symbols: active quote-sheet symbols (None skips the benchmark
+    listed_symbols: active watchlist symbols (None skips the benchmark
     listing check — used only on the idempotent resume path)."""
     today = today or date.today()
     reasons = []
@@ -151,7 +151,7 @@ def validate_packet(packet, taken_ids, has_live_agent, listed_symbols, today=Non
         unlisted = [s for s in symbols if s not in listed_symbols]
         if unlisted:
             reasons.append(f"Benchmark symbol(s) {', '.join(unlisted)} are not "
-                           "on the arena quote sheet. The judge must be "
+                           "on the arena watchlist. The judge must be "
                            "quotable.")
 
     principles = []
@@ -220,13 +220,30 @@ def validate_packet(packet, taken_ids, has_live_agent, listed_symbols, today=Non
 # ---------- seed-file generation (house formats — parsed by jobs/site.py) ----------
 
 
+def _restates_floor_rule(item):
+    """True when a principal-set clause restates a rule the harness already
+    carries (floor rules, the universe line, the position cap). Interviews
+    often echo the floor back; a constitution must not state the same law
+    twice — or worse, twice with different words."""
+    t = item.lower()
+    return bool(
+        re.search(r"long[- ]only|no leverage|no short|no derivativ|cash never negative", t)
+        or t.startswith("universe")
+        or "quote sheet" in t or "watchlist" in t
+        or re.search(r"max(imum)?\s+single\s+position|per\s?cent of equity|% of equity", t)
+        or ("thesis" in t and "invalidation" in t)
+        or ("simulated" in t and ("fill" in t or "price" in t))
+    )
+
+
 def harness_md(c, today):
     constitution = (
         FLOOR_HEAD
-        + [f"Universe: {c['universe']} — arena quote sheet symbols only; "
+        + [f"Universe: {c['universe']} — arena watchlist symbols only; "
            "unlisted names go through watchlist requests."]
         + [f"Max single position: {c['max_position_pct']:g}% of equity at cost. [principal-set]"]
-        + [f"{item} [principal-set]" for item in c["constitution"]]
+        + [f"{item} [principal-set]" for item in c["constitution"]
+           if not _restates_floor_rule(item)]
         + FLOOR_TAIL
     )
     identity = " ".join(filter(None, [
@@ -241,7 +258,7 @@ def harness_md(c, today):
     )
     bench = c["benchmark"]
     params = [
-        "Cadence: daily (seated tier — one run per market day, at the close slot).",
+        "Cadence: every market day, both bells (open and close slots), plus event triggers.",
         f"Benchmark: {bench['label']} ({', '.join(bench['symbols'])}).",
         "Reflection triggers: arena defaults.",
     ]

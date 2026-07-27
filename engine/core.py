@@ -8,6 +8,14 @@ from datetime import datetime, timezone
 
 COST = 0.0015          # 0.15% slippage+fees, applied against the agent
 DRAWDOWN_TRIGGER = 0.07  # wake the brain when equity drops >7% from peak
+# Consecutive sessions without an order before inaction becomes reviewable.
+# The arena's mandate is that inaction requires as much justification as action,
+# but nothing enforced it: an agent whose entry conditions never fire produces
+# no fills, no closed positions and no drawdown, so it generated no reflection
+# event of any kind and could sit in cash indefinitely, unexamined. Three
+# sessions is a day and a half — long enough to be a stance, short enough that
+# the agent still remembers arguing for it.
+DORMANT_SESSIONS = 3
 
 
 # ---------- pure functions ----------
@@ -64,6 +72,17 @@ def limit_sell_triggered(params, price):
 def stop_buy_triggered(params, price):
     """Breakout entry: buy once the market trades up through the trigger."""
     return price >= float(params["trigger_price"])
+
+
+def idle_streak(traded_flags):
+    """traded_flags: did each session place an order, newest session first.
+    → how many sessions in a row, ending at the most recent one, placed none."""
+    n = 0
+    for traded in traded_flags:
+        if traded:
+            break
+        n += 1
+    return n
 
 
 # ---------- constitution: what a buy is allowed to be ----------
@@ -391,6 +410,58 @@ def bootstrap_launches(conn, quotes, now=None):
         launched.append(r["agent_id"])
     conn.commit()
     return launched
+
+
+def flag_dormancy(conn, agent_id, threshold=DORMANT_SESSIONS):
+    """File a 'dormant' trigger once an agent has gone `threshold` consecutive
+    sessions without placing an order, so that inaction becomes reviewable the
+    same way a closed position is.
+
+    Filed handled=true: this is not a request to wake the brain (the agent has
+    just deliberated — waking it to deliberate again would only produce the same
+    argument), it is a request for the *reflection* to confront the inaction.
+    Fires at most once per reflection period, so a genuinely patient agent is
+    asked to justify itself once rather than at every session.
+
+    Returns the streak length when a trigger is filed, else None.
+    """
+    rows = conn.execute(
+        """select exists (
+                 select 1 from operations o
+                 where o.run_id = r.id and o.type = 'place_order'
+                   and o.verdict = 'accepted') as traded
+           from runs r
+           where r.agent_id = %s and r.status = 'completed'
+             and r.trigger not like 'reflection%%'
+           order by r.started desc
+           limit 50""",
+        (agent_id,),
+    ).fetchall()
+    streak = idle_streak([r["traded"] for r in rows])
+    if streak < threshold:
+        return None
+
+    since = conn.execute(
+        """select max(started) t from runs
+           where agent_id=%s and trigger like 'reflection%%' and status='completed'""",
+        (agent_id,),
+    ).fetchone()["t"]
+    already = conn.execute(
+        """select 1 from triggers_fired
+           where agent_id=%s and kind='dormant' and (%s::timestamptz is null or ts > %s)
+           limit 1""",
+        (agent_id, since, since),
+    ).fetchone()
+    if already:
+        return None
+
+    conn.execute(
+        """insert into triggers_fired (agent_id, kind, details, handled)
+           values (%s,'dormant',%s,true)""",
+        (agent_id, json.dumps({"sessions_without_orders": streak})),
+    )
+    conn.commit()
+    return streak
 
 
 def mark_all(conn, quotes, now=None):

@@ -163,3 +163,26 @@ def test_symbol_cap_follows_the_chartered_wording():
     fury = {"max_single_pct": 0.35, "crypto_core_cap_pct": 0.35}
     assert core.symbol_cap(fury, "equity") == 0.35
     assert core.symbol_cap(fury, "crypto") == 0.35
+
+
+# ---------- dormancy: inaction as a reviewable event ----------
+
+def test_idle_streak_counts_back_from_the_latest_session():
+    # newest first: no order, no order, no order, then a session that traded
+    assert core.idle_streak([False, False, False, True, False]) == 3
+    assert core.idle_streak([True, False, False]) == 0
+    assert core.idle_streak([]) == 0
+    assert core.idle_streak([False, False]) == 2
+
+
+def test_idle_streak_resets_on_any_order():
+    """A single order breaks the streak — an agent that trades once a week is
+    patient, not dormant, and must not be charged with inaction."""
+    assert core.idle_streak([False, True, False, False, False, False]) == 1
+
+
+def test_dormancy_threshold_is_three_sessions():
+    assert core.DORMANT_SESSIONS == 3
+    flags = [False] * core.DORMANT_SESSIONS
+    assert core.idle_streak(flags) >= core.DORMANT_SESSIONS
+    assert core.idle_streak(flags[:-1]) < core.DORMANT_SESSIONS

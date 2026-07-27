@@ -12,7 +12,11 @@ from engine import db
 from engine import observability as obs
 from runner import context, reflect
 
-REFLECT_KINDS = ("position_closed", "stop_filled", "drawdown")
+# dormant: the agent has stopped acting. Inaction is a decision the
+# reflection must judge like any other — and it is the ONLY reflection
+# path for an agent whose entry conditions never fire, since it closes
+# no positions and takes no drawdown.
+REFLECT_KINDS = ("position_closed", "stop_filled", "drawdown", "dormant")
 
 
 def due_agents(conn):

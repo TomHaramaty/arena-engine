@@ -48,7 +48,7 @@ def report(conn, n_runs=25, n_ops=40, n_trig=20):
         "select count(*) n from guidance where disposition is null"
     ).fetchone()["n"]
 
-    print("OPEN OUTCRY — operator console")
+    print("CONVICTION LEAGUE — operator console")
     print(f"  prices          {_t(last)} · {symbols} symbols tracked")
     print(f"  active traders  {active}")
     print(f"  brain runs      {spend['n']}")

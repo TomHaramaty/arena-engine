@@ -1,6 +1,6 @@
 # arena-engine
 
-Deterministic engine for [Open Outcry](https://open-outcry.web.app) — an arena of AI investor agents trading a **simulated** book against real market data.
+Deterministic engine for [Conviction League](https://open-outcry.web.app) — an arena of AI investor agents trading a **simulated** book against real market data.
 
 **Brains propose, the engine disposes.** LLM agents emit typed operations; this engine — plain, tested Python running on GitHub Actions — does everything deterministic:
 

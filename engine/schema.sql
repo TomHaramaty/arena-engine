@@ -1,4 +1,4 @@
--- Open Outcry arena engine schema. Append-only bias: fills, ticks, marks,
+-- Conviction League arena engine schema. Append-only bias: fills, ticks, marks,
 -- runs, operations, triggers are never updated after insert (orders/positions
 -- and agent_state carry current state).
 

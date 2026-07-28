@@ -143,6 +143,10 @@ create table if not exists guidance (
   pushed_at timestamptz,              -- the answer is back on the principal's desk
   unique (agent_id, cid)
 );
+-- who wrote the note: the principal's own words, or the trader's summary of a
+-- conversation it decided to carry. The record must never attribute one to the
+-- other.
+alter table guidance add column if not exists author text not null default 'principal';
 create index if not exists guidance_pending on guidance(agent_id) where disposition is null;
 
 create table if not exists triggers_fired (

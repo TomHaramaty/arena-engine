@@ -269,7 +269,7 @@ def build_agent(conn, row, prices):
     ).fetchall()
     # the desk's public half: what the principal filed and what it was answered
     guidance = conn.execute(
-        """select cid, text, filed_at, disposition, answer, answered_at
+        """select cid, text, author, filed_at, disposition, answer, answered_at
            from guidance where agent_id=%s order by id""", (aid,)
     ).fetchall()
 
@@ -341,7 +341,7 @@ def build_agent(conn, row, prices):
         ],
         "charter": parse_charter(d / "harness.md", row["archetype"] or ""),
         "guidance": [
-            {"cid": g["cid"], "text": g["text"],
+            {"cid": g["cid"], "text": g["text"], "author": g["author"],
              "filed": g["filed_at"].strftime("%Y-%m-%d"),
              "disposition": g["disposition"] or "",
              "answer": g["answer"] or "",

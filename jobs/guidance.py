@@ -33,10 +33,12 @@ MAX_TEXT = 4000
 PER_DAY = 3  # notes one principal may file for one trader in a day
 
 HEADER = ("# {name} — guidance\n\n"
-          "Notes filed by the principal at their desk. Guidance carries standing "
-          "and no authority: {name} must answer every note at its next session, "
-          "and may decline or refuse it with reasons. Entries are appended, never "
-          "rewritten — an answer is a new entry under the same id.\n")
+          "Notes {name} carried from its desk — the principal's own words, or "
+          "{name}'s note of what a conversation with them settled. Guidance has "
+          "standing and no authority: {name} must answer every note at its next "
+          "session, and may decline or refuse it with reasons. Entries are "
+          "appended, never rewritten — an answer is a new entry under the same "
+          "id.\n")
 
 DISPOSITIONS = ("adopted", "converted", "declined", "refused")
 
@@ -91,6 +93,7 @@ def take(conn, doc, today):
     uid = str(data.get("uid") or "")
     aid = str(data.get("trader") or "")
     text = str(data.get("text") or "").strip()
+    author = "trader" if data.get("author") == "trader" else "principal"
 
     if not text:
         return reject(doc, "The note was empty.")
@@ -116,13 +119,16 @@ def take(conn, doc, today):
                      (aid,)).fetchone()["c"]
     cid = f"C{n + 1}"
     conn.execute(
-        """insert into guidance (agent_id, cid, uid, doc_id, text)
-           values (%s,%s,%s,%s,%s) on conflict (doc_id) do nothing""",
-        (aid, cid, uid, doc.id, text))
+        """insert into guidance (agent_id, cid, uid, doc_id, text, author)
+           values (%s,%s,%s,%s,%s,%s) on conflict (doc_id) do nothing""",
+        (aid, cid, uid, doc.id, text, author))
     conn.commit()
 
-    path = append_entry(aid, row["name"], f"{cid} · filed {today}",
-                        "\n".join("> " + ln for ln in text.splitlines()))
+    whose = (f"— {row['name']}'s own note, from the desk" if author == "trader"
+             else "— the principal's words, from the desk")
+    path = append_entry(
+        aid, row["name"], f"{cid} · filed {today}",
+        "\n".join("> " + ln for ln in text.splitlines()) + f"\n\n{whose}")
     doc.reference.update({"status": "ingested", "cid": cid,
                           "ingestedAt": firestore.SERVER_TIMESTAMP})
     print(f"  {doc.id}: FILED — {aid} {cid}")

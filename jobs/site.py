@@ -228,6 +228,23 @@ def tlabel(ts):
     return ts.strftime("%b %d %H:%M")
 
 
+def order_trigger(kind, params):
+    """The price a resting order fires at, computed the way engine/core.py
+    computes it — so the floor can print how far a stop is from being hit
+    without ever guessing at the rule behind it."""
+    p = params or {}
+    try:
+        if kind == "trailing_stop":
+            return round(float(p["high_water"]) * (1 - float(p["trail_pct"])), 4)
+        if kind == "stop":
+            return float(p["trigger_price"])
+        if kind == "limit":
+            return float(p["limit_price"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return None
+
+
 def arena_curve(conn):
     """Equal-weight arena index across all agents, chain-linked so agents that
     join mid-history enter at the index level of their first mark instead of
@@ -321,8 +338,10 @@ def build_agent(conn, row, prices):
         chartered_by = str(credit.get("name") or "") if credit.get("show") else ""
 
     return {
+        # `brain` is deliberately absent: which model runs a trader is an
+        # internal codename, not a product fact, and the floor never showed it.
         "id": aid, "name": row["name"], "archetype": row["archetype"],
-        "brain": row["brain"], "chartered_by": chartered_by,
+        "chartered_by": chartered_by,
         "cadence": meta.get("cadence", "Twice daily"),
         "universe": meta.get("universe") or harness_universe(d / "harness.md"),
         "color": color, "avatar": avatar,
@@ -339,10 +358,16 @@ def build_agent(conn, row, prices):
             "v": round(equity / INITIAL * 100, 4)}],
         "bench_curve": bench_curve,
         "positions": pos_out,
+        # Resting rules, with the price each one fires at and the price it is
+        # watching — so the floor can say how close a stop is to being hit
+        # instead of printing the raw params blob it used to.
         "standing_orders": [
-            {"id": o["id"], "kind": o["kind"], "side": o["side"], "symbol": o["symbol"],
+            {"kind": o["kind"], "side": o["side"], "symbol": o["symbol"],
              "qty": float(o["qty"]) if o["qty"] is not None else None,
-             "params": o["params"], "note": o["reason"] or ""} for o in standing
+             "trigger": order_trigger(o["kind"], o["params"]),
+             "mark": prices.get(o["symbol"]),
+             "placed": tlabel(o["created_at"]),
+             "note": o["reason"] or ""} for o in standing
         ],
         "fills": [
             {"ts": tlabel(f["ts"]), "symbol": f["symbol"], "side": f["side"],
@@ -366,40 +391,88 @@ def build_agent(conn, row, prices):
 
 
 def system_block(conn):
-    last_tick = conn.execute("select max(ts) t, count(distinct symbol) n from ticks where ts = (select max(ts) from ticks)").fetchone()
-    tick_count = conn.execute("select count(distinct symbol) n from ticks").fetchone()["n"]
-    runs = conn.execute(
-        """select r.*, a.name from runs r join agents a on a.id=r.agent_id
-           order by r.started desc limit 25"""
-    ).fetchall()
-    total_cost = conn.execute("select coalesce(sum(cost_usd),0) c from runs").fetchone()["c"]
-    ops = conn.execute(
-        """select o.*, r.agent_id from operations o join runs r on r.id=o.run_id
-           order by o.created_at desc limit 40"""
-    ).fetchall()
-    trig = conn.execute(
-        "select * from triggers_fired order by ts desc limit 20"
-    ).fetchall()
+    """What the public artifact says about the machine: only how fresh the
+    prices are. Run costs, token counts and the operations ledger are the
+    operator's — `python3 -m jobs.ops` reads them from Postgres. Publishing a
+    running bill on the floor told a visitor nothing and anchored a price on a
+    product that has not set one."""
+    last = conn.execute("select max(ts) t from ticks").fetchone()
+    symbols = conn.execute("select count(distinct symbol) n from ticks").fetchone()["n"]
     return {
-        "last_tick": tlabel(last_tick["t"]) if last_tick["t"] else "never",
-        "symbols_tracked": tick_count,
-        "total_cost_usd": float(total_cost),
-        "runs": [
-            {"id": r["id"], "agent": r["agent_id"], "trigger": r["trigger"],
-             "status": r["status"], "started": tlabel(r["started"]),
-             "cost": float(r["cost_usd"]) if r["cost_usd"] is not None else None,
-             "tokens_in": r["tokens_in"], "tokens_out": r["tokens_out"]} for r in runs
-        ],
-        "ops": [
-            {"agent": o["agent_id"], "type": o["type"], "verdict": o["verdict"],
-             "reason": o["reason"] or "", "ts": tlabel(o["created_at"]),
-             "summary": json.dumps(o["payload"])[:140]} for o in ops
-        ],
-        "triggers": [
-            {"agent": t["agent_id"], "kind": t["kind"], "ts": tlabel(t["ts"]),
-             "handled": t["handled"], "details": json.dumps(t["details"])[:120]} for t in trig
-        ],
+        "last_update": tlabel(last["t"]) if last["t"] else "never",
+        "symbols_tracked": symbols,
     }
+
+
+def tape_block(conn, limit=150):
+    """Every action the floor took, newest first, built only from what the
+    engine wrote at the time.
+
+    A trade's words come from wherever the record actually holds them: a market
+    buy is given the thesis from the accepted operation of its own run (the
+    orders table has no reason column for market orders), a stop or limit
+    carries the note the trader armed it with, and a market sell gets none —
+    the op contract never asked for one. Nothing is composed after the fact and
+    nothing is written back into orders to make this tidier.
+
+    A refused trade is on the tape too: a trader reaching past its constitution
+    and being stopped in code is the floor's whole claim, made watchable.
+    Refused standing orders are not — they are nearly always the cascade of a
+    refused buy (no position left to protect) and read as noise."""
+    ev = []
+
+    theses = {}
+    for r in conn.execute(
+        """select r.id run_id, o.payload from operations o join runs r on r.id=o.run_id
+           where o.type='place_order' and o.verdict='accepted'"""
+    ).fetchall():
+        p = r["payload"] or {}
+        if p.get("thesis"):
+            theses[(r["run_id"], p.get("symbol"))] = p["thesis"]
+
+    for f in conn.execute(
+        """select f.*, o.kind, o.reason, o.run_id from fills f
+           left join orders o on o.id = f.order_id
+           order by f.ts desc limit %s""", (limit,)
+    ).fetchall():
+        ev.append({
+            "t": int(f["ts"].timestamp()), "when": tlabel(f["ts"]),
+            "agent": f["agent_id"], "event": "fill", "side": f["side"],
+            "symbol": f["symbol"], "qty": float(f["qty"]),
+            "price": float(f["fill_price"]),
+            "mechanism": f["kind"] or "market",
+            "note": f["reason"] or theses.get((f["run_id"], f["symbol"]), ""),
+        })
+
+    for o in conn.execute(
+        """select * from orders where kind <> 'market'
+           order by created_at desc limit %s""", (limit,)
+    ).fetchall():
+        base = {"agent": o["agent_id"], "side": o["side"], "symbol": o["symbol"],
+                "mechanism": o["kind"], "trigger": order_trigger(o["kind"], o["params"]),
+                "note": o["reason"] or ""}
+        ev.append({"t": int(o["created_at"].timestamp()),
+                   "when": tlabel(o["created_at"]), "event": "armed", **base})
+        if o["status"] == "canceled" and o["closed_at"]:
+            ev.append({"t": int(o["closed_at"].timestamp()),
+                       "when": tlabel(o["closed_at"]), "event": "pulled", **base})
+
+    for o in conn.execute(
+        """select o.*, r.agent_id from operations o join runs r on r.id=o.run_id
+           where o.verdict='rejected' and o.type='place_order'
+           order by o.created_at desc limit %s""", (limit,)
+    ).fetchall():
+        p = o["payload"] or {}
+        ev.append({
+            "t": int(o["created_at"].timestamp()), "when": tlabel(o["created_at"]),
+            "agent": o["agent_id"], "event": "blocked", "side": p.get("side", ""),
+            "symbol": p.get("symbol", ""),
+            "notional": float(p["notional_usd"]) if p.get("notional_usd") else None,
+            "note": o["reason"] or "",
+        })
+
+    ev.sort(key=lambda e: e["t"], reverse=True)
+    return ev[:limit]
 
 
 def main():
@@ -420,13 +493,14 @@ def main():
         "initial_capital": INITIAL,
         "agents": [build_agent(conn, r, prices) for r in agents_rows],
         "arena_curve": arena_curve(conn),
+        "tape": tape_block(conn),
         "system": system_block(conn),
     }
     site = ROOT / "site"
     site.mkdir(exist_ok=True)
     (site / "arena.json").write_text(json.dumps(data, indent=1))
-    print(f"site built: {len(data['agents'])} agents, {len(data['system']['runs'])} runs, "
-          f"total spend ${data['system']['total_cost_usd']:.2f}")
+    print(f"site built: {len(data['agents'])} agents, {len(data['tape'])} tape events, "
+          f"prices {data['system']['last_update']}")
 
 
 if __name__ == "__main__":

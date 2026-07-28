@@ -82,29 +82,50 @@ jobs:
         run: |
           python -m jobs.bell "$APP_ID" first-session
           python -m jobs.agent_run "${{ steps.agent.outputs.id }}" --trigger first-bell
-          python -m jobs.bell "$APP_ID" done
-      - name: Build arena.json
+      # The entry exists now, but the floor is a build artifact — the trader is
+      # not on it until arena.json is published AND arena-web has redeployed.
+      # So publishing is its own stage the principal watches, and `done` waits
+      # for the floor to actually serve the trader (below). Anything else hands
+      # them a "watch it on the floor" link that lands on a floor without it.
+      - name: Publish to the floor (stage publishing)
         if: steps.agent.outputs.status == 'seated'
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           TRADER_REPO: ${{ github.workspace }}/trader
-        run: python -m jobs.site
-      - name: Push data to arena-web
-        if: steps.agent.outputs.status == 'seated'
-        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/fs_sa.json
+          APP_ID: ${{ github.event.client_payload.app_id }}
           ARENA_WEB_SSH_KEY: ${{ secrets.ARENA_WEB_SSH_KEY }}
         run: |
+          python -m jobs.bell "$APP_ID" publishing
+          python -m jobs.site
           echo "$ARENA_WEB_SSH_KEY" > ~/.ssh/arena_web_key && chmod 600 ~/.ssh/arena_web_key
-          GIT_SSH_COMMAND="ssh -i ~/.ssh/arena_web_key -o IdentitiesOnly=yes" \
-            git clone -q --depth 1 git@github.com:TomHaramaty/arena-web.git webrepo
-          cp site/arena.json webrepo/data/arena.json
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/arena_web_key -o IdentitiesOnly=yes"
+          git clone -q --depth 1 git@github.com:TomHaramaty/arena-web.git webrepo
           cd webrepo
           git config user.name "arena-bot" && git config user.email "arena-bot@users.noreply.github.com"
-          git add data/arena.json
-          git diff --cached --quiet && echo "no data changes" || {
+          # An hourly tick can land its own arena.json between our clone and our
+          # push. Rebuild on whatever head won and push again — never merge:
+          # arena.json is generated whole, and ours is the later build.
+          published=""
+          for attempt in 1 2 3; do
+            git fetch -q origin main && git reset -q --hard origin/main
+            cp ../site/arena.json data/arena.json
+            git add data/arena.json
+            if git diff --cached --quiet; then published="unchanged"; break; fi
             git commit -q -m "data: first bell"
-            GIT_SSH_COMMAND="ssh -i ~/.ssh/arena_web_key -o IdentitiesOnly=yes" git push -q
-          }
+            if git push -q; then published="pushed"; break; fi
+            echo "push rejected (a tick raced us) — rebuilding on the new head, attempt $attempt"
+          done
+          [ -n "$published" ] || { echo "could not publish arena.json"; exit 1; }
+          echo "arena.json: $published"
+      - name: The floor has it (stage done)
+        if: steps.agent.outputs.status == 'seated' && steps.agent.outputs.id != ''
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/fs_sa.json
+          APP_ID: ${{ github.event.client_payload.app_id }}
+        run: |
+          python -m jobs.bell "$APP_ID" --await-floor "${{ steps.agent.outputs.id }}"
+          python -m jobs.bell "$APP_ID" done
       - name: Honest failure stage
         if: failure()
         env:

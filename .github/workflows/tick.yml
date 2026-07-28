@@ -54,6 +54,13 @@ jobs:
         run: |
           printf '%s' "$FIRESTORE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/fs_sa.json"
           GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/fs_sa.json" python -m jobs.ingest
+      - name: Sync who is named on the floor
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          FIRESTORE_SERVICE_ACCOUNT: ${{ secrets.FIRESTORE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$FIRESTORE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/fs_sa.json"
+          GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/fs_sa.json" python -m jobs.credit
       - name: Take guidance from the desks
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

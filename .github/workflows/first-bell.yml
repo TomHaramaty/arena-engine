@@ -52,6 +52,7 @@ jobs:
         run: |
           python -m jobs.bell "$APP_ID" seating
           python -m jobs.ingest
+          python -m jobs.credit
       - name: Resolve the seated agent
         id: agent
         env:

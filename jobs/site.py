@@ -311,9 +311,18 @@ def build_agent(conn, row, prices):
     avatar = avatar or meta.get("avatar") or AVATAR_BACKFILL.get(aid) or DEFAULT_AVATAR
     color = meta.get("color") or AVATAR_PALETTE[avatar["color"] % len(AVATAR_PALETTE)]
 
+    # Who chartered it. A principal is named on the floor only if they asked to
+    # be (jobs/credit carries that choice into config); silence means anonymous,
+    # and an agent with no principal is the house's own.
+    credit = cfg.get("credit") if isinstance(cfg.get("credit"), dict) else {}
+    if not row["owner_uid"]:
+        chartered_by = "the house"
+    else:
+        chartered_by = str(credit.get("name") or "") if credit.get("show") else ""
+
     return {
         "id": aid, "name": row["name"], "archetype": row["archetype"],
-        "brain": row["brain"],
+        "brain": row["brain"], "chartered_by": chartered_by,
         "cadence": meta.get("cadence", "Twice daily"),
         "universe": meta.get("universe") or harness_universe(d / "harness.md"),
         "color": color, "avatar": avatar,

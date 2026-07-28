@@ -30,7 +30,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -q "psycopg[binary]" requests sentry-sdk
+      - run: pip install -q "psycopg[binary]" requests google-cloud-firestore sentry-sdk
       - name: Clone trader-arena (journals)
         env:
           TRADER_SSH_KEY: ${{ secrets.TRADER_SSH_KEY }}
@@ -41,6 +41,15 @@ jobs:
             git clone -q --branch claude/arena git@github.com:TomHaramaty/trader-arena.git trader
           git -C trader config user.name "arena-bot"
           git -C trader config user.email "arena-bot@users.noreply.github.com"
+      - name: Take guidance from the desks (before the bell)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TRADER_REPO: ${{ github.workspace }}/trader
+          GIT_SSH_COMMAND: ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes
+          FIRESTORE_SERVICE_ACCOUNT: ${{ secrets.FIRESTORE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$FIRESTORE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/fs_sa.json"
+          GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/fs_sa.json" python -m jobs.guidance
       - name: Run all brains
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -49,6 +58,16 @@ jobs:
           TRADER_REPO: ${{ github.workspace }}/trader
           GIT_SSH_COMMAND: ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes
         run: python -m jobs.dispatch
+      - name: Answer the desks
+        if: always()
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TRADER_REPO: ${{ github.workspace }}/trader
+          GIT_SSH_COMMAND: ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes
+          FIRESTORE_SERVICE_ACCOUNT: ${{ secrets.FIRESTORE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$FIRESTORE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/fs_sa.json"
+          GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/fs_sa.json" python -m jobs.guidance
       - name: Build arena.json
         if: always()
         env:

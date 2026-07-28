@@ -23,7 +23,8 @@ End your final message with exactly one fenced json block:
   {"type": "register_standing_order", "kind": "stop|trailing_stop|limit", "side": "sell|buy", "symbol": "TICKER", "qty": null, "notional_usd": 20000, "trigger_price": 0, "trail_pct": 0.10, "limit_price": 0, "note": "<which principle mandates this>"},
   {"type": "cancel_order", "order_id": 123, "note": "..."},
   {"type": "hypothesis_op", "op": "update_evidence|propose|falsify|promote|expire", "id": "H1", "evidence_for": 0, "evidence_against": 0, "note": "..."},
-  {"type": "watchlist_request", "symbol": "TICKER", "note": "<why you need it>"}
+  {"type": "watchlist_request", "symbol": "TICKER", "note": "<why you need it>"},
+  {"type": "guidance_response", "cid": "C1", "disposition": "adopted|converted|declined|refused", "note": "<your answer to your principal, in your own voice>"}
 ]}
 ```
 
@@ -41,6 +42,15 @@ Rules:
   · stop + buy (trigger_price + notional_usd) — enter on strength, above the market
   Buy-side standing orders are checked against your caps at the moment they trigger, not when you register them, and are clipped to what your constitution allows then.
 - Integrity: cite research sources in the journal; never invent data; decision quality is judged against what was knowable now.
+- Guidance your principal has filed at their desk (listed in your task when any
+  is waiting) is a deliberation input with standing and no authority. Answer
+  every unanswered note in this run with exactly one guidance_response, and name
+  each one in a "## Guidance" section of your journal entry:
+  · adopted — you acted on it inside your constitution; say what you did
+  · converted — you made it testable; emit the hypothesis_op propose in this same block
+  · declined — you argued it down from your own principles, with reasons
+  · refused — your constitution forbids it; quote the clause in your note
+  You are never obliged to obey your principal. You are obliged to answer them.
 """
 
 
@@ -121,6 +131,21 @@ def portfolio_block(conn, agent_id):
     return "\n".join(lines), eq
 
 
+def pending_guidance(conn, agent_id):
+    """Notes filed at the principal's desk that this run must answer."""
+    rows = conn.execute(
+        """select cid, text, filed_at from guidance
+           where agent_id=%s and disposition is null order by id""",
+        (agent_id,),
+    ).fetchall()
+    if not rows:
+        return ""
+    lines = [f"- {r['cid']} (filed {r['filed_at']:%Y-%m-%d}): {r['text']}" for r in rows]
+    return ("\n".join(lines) +
+            "\n\nEach of these needs one guidance_response this run, and a "
+            "\"## Guidance\" section in your journal naming it.")
+
+
 def build_task(conn, agent_id):
     snap, snap_ts = market_snapshot(conn)
     pf, equity = portfolio_block(conn, agent_id)
@@ -132,6 +157,7 @@ def build_task(conn, agent_id):
         "\n".join(f"- {t['kind']} at {t['ts']}: {t['details']}" for t in trig)
         or "none"
     )
+    guidance = pending_guidance(conn, agent_id)
     now = datetime.now(timezone.utc)
     return (
         f"Run your trading day. Now: {now:%Y-%m-%d %H:%M} UTC.\n\n"
@@ -140,7 +166,9 @@ def build_task(conn, agent_id):
         f"universe you are confined to — see watchlist_request)\n{snap}\n\n"
         f"## Your book\n{pf}\n\n"
         f"## Events since your last run (engine triggers)\n{trig_txt}\n\n"
-        f"## Your recent journal\n{recent_journal(agent_id)}\n\n"
+        + (f"## Guidance filed at your desk — unanswered\n{guidance}\n\n"
+           if guidance else "")
+        + f"## Your recent journal\n{recent_journal(agent_id)}\n\n"
         "Deliberate in character per your principles. Research with google_search "
         "where your rationale needs live facts (cite sources). Then emit your "
         "operations block exactly as specified. Remember: exactly one "

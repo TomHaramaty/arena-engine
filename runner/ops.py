@@ -248,6 +248,39 @@ def validate_and_apply(conn, agent, run_id, ops, dry=False, resolver=None):
             elif t == "hypothesis_op":
                 record(op, "accepted", "recorded (prose files updated at reflection)")
 
+            elif t == "guidance_response":
+                # The principal's note has standing and no authority: the agent
+                # must answer it, and the answer itself is what enters the
+                # record. The engine only checks that the answer is real and
+                # addressed to a note that is actually waiting.
+                cid = str(op.get("cid") or "").strip().upper()
+                disp = str(op.get("disposition") or "").strip().lower()
+                note = str(op.get("note") or "").strip()
+                g = conn.execute(
+                    """select id from guidance where agent_id=%s and cid=%s
+                       and disposition is null""", (agent_id, cid)).fetchone()
+                if not g:
+                    record(op, "rejected",
+                           f"no unanswered guidance {cid or '(none given)'} for you"); continue
+                if disp not in ("adopted", "converted", "declined", "refused"):
+                    record(op, "rejected",
+                           "disposition must be adopted, converted, declined or refused"); continue
+                if len(note) < 20:
+                    record(op, "rejected",
+                           "your principal gets an answer in your own words, not a label"); continue
+                if disp == "converted" and not any(
+                        o.get("type") == "hypothesis_op" and o.get("op") == "propose"
+                        for o in ops):
+                    record(op, "rejected",
+                           "converted means you filed the test: propose the hypothesis "
+                           "in this same operations block"); continue
+                if not dry:
+                    conn.execute(
+                        """update guidance set disposition=%s, answer=%s,
+                           answered_run=%s, answered_at=%s where id=%s""",
+                        (disp, note, run_id, now, g["id"]))
+                record(op, "accepted", f"{cid} answered: {disp}")
+
             elif t == "watchlist_request":
                 sym = (op.get("symbol") or "").upper()
                 if not sym or not re.fullmatch(r"[A-Z0-9.\-]{1,12}", sym):

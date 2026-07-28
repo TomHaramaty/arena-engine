@@ -65,6 +65,61 @@ def _ev(line):
     return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
 
 
+def _md_sections(text):
+    """`## Heading` → body, keyed by the heading's first word-group lowercased
+    ("Constitution (hard limits — …)" → "constitution")."""
+    out = {}
+    for m in re.finditer(r"(?ms)^##\s+(.+?)\s*\n(.*?)(?=^##\s+|\Z)", text):
+        out[m.group(1).strip().split(" (")[0].strip().lower()] = m.group(2).strip()
+    return out
+
+
+def _bullets(body):
+    """`- ` items, with continuation lines folded into the item above."""
+    out = []
+    for line in body.splitlines():
+        s = line.strip()
+        if s.startswith("- "):
+            out.append(s[2:].strip())
+        elif s and out:
+            out[-1] += " " + s
+    return out
+
+
+def parse_charter(path, archetype=""):
+    """The harness as structured data: what the trader is, what binds it, and
+    what has been amended since. Every field is already public in substance —
+    the constitution is what the engine enforces on the agent's behalf — and
+    the desk needs it verbatim to speak in character without a private fetch."""
+    text = read(path)
+    if not text:
+        return None
+    secs = _md_sections(text)
+    ident, voice = secs.get("identity", ""), ""
+    m = re.search(r"(?s)\bVoice:\s*(.+)$", ident)
+    if m:
+        voice = m.group(1).strip()
+        ident = ident[:m.start()].strip()
+    # the archetype is the identity's opening phrase; the credo is what follows
+    credo = ident
+    if archetype and credo.lower().startswith(archetype.lower()):
+        credo = credo[len(archetype):].lstrip(" .—-").strip()
+    amendments = []
+    for b in _bullets(secs.get("amendments", "")):
+        m2 = re.match(r"\*\*(\d{4}-\d{2}-\d{2})\s*[—-]+\s*(.+?)\*\*[.\s]*(.*)$", b, re.S)
+        amendments.append({"date": m2.group(1), "title": m2.group(2).strip(),
+                           "text": m2.group(3).strip()} if m2
+                          else {"date": "", "title": "", "text": b})
+    return {
+        "credo": credo,
+        "voice": voice,
+        "mandate": secs.get("mandate", ""),
+        "constitution": _bullets(secs.get("constitution", "")),
+        "parameters": _bullets(secs.get("parameters", "")),
+        "amendments": amendments,
+    }
+
+
 def parse_principles(path):
     out, cur, mode = [], None, None
     for raw in read(path).splitlines():
@@ -212,6 +267,11 @@ def build_agent(conn, row, prices):
     standing = conn.execute(
         "select * from orders where agent_id=%s and status='open' order by id", (aid,)
     ).fetchall()
+    # the desk's public half: what the principal filed and what it was answered
+    guidance = conn.execute(
+        """select cid, text, author, filed_at, disposition, answer, answered_at
+           from guidance where agent_id=%s order by id""", (aid,)
+    ).fetchall()
 
     cash = float(st["cash"])
     pos_out, pv = [], 0.0
@@ -278,6 +338,15 @@ def build_agent(conn, row, prices):
         "fills": [
             {"ts": tlabel(f["ts"]), "symbol": f["symbol"], "side": f["side"],
              "qty": float(f["qty"]), "fill_price": float(f["fill_price"])} for f in fills
+        ],
+        "charter": parse_charter(d / "harness.md", row["archetype"] or ""),
+        "guidance": [
+            {"cid": g["cid"], "text": g["text"], "author": g["author"],
+             "filed": g["filed_at"].strftime("%Y-%m-%d"),
+             "disposition": g["disposition"] or "",
+             "answer": g["answer"] or "",
+             "answered": g["answered_at"].strftime("%Y-%m-%d") if g["answered_at"] else ""}
+            for g in guidance
         ],
         "journal": journal, "principles": principles, "hypotheses": hyps,
         "n_principles": sum(1 for p in principles if p["status"] != "retired"),

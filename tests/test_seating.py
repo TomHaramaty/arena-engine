@@ -3,7 +3,7 @@ import json
 from datetime import date
 
 from engine import seating
-from jobs.site import parse_hypotheses, parse_principles
+from jobs.site import parse_charter, parse_hypotheses, parse_principles
 
 TODAY = date(2026, 7, 23)
 LISTED = {"SPY", "QQQ", "BTC-USD"}
@@ -212,6 +212,33 @@ def test_harness_embeds_floor_and_principal_limits(tmp_path):
     assert "Never average down into a losing position. [principal-set]" in text
     assert "Benchmark: SPY (SPY)." in text
     assert "skeptical, plain-spoken" in text
+
+
+def test_charter_parses_with_site_parser(tmp_path):
+    # The desk speaks in the trader's own voice from published data, so the
+    # harness must survive the round trip to arena.json intact.
+    _, d, _ = seeded(tmp_path)
+    c = parse_charter(d / "harness.md", "Earnings-noise contrarian")
+    assert c["credo"] == "The market panics over earnings noise in good companies."
+    assert c["voice"].startswith("skeptical, plain-spoken")
+    assert "Prove the credo on the public record" in c["mandate"]
+    assert "Max single position: 25% of equity at cost. [principal-set]" in c["constitution"]
+    assert any(x.startswith("Long-only") for x in c["constitution"])
+    assert any(x.startswith("Benchmark: SPY") for x in c["parameters"])
+    assert c["amendments"] == []
+    assert parse_charter(d / "nope.md") is None
+
+
+def test_charter_reads_amendments(tmp_path):
+    _, d, _ = seeded(tmp_path)
+    p = d / "harness.md"
+    p.write_text(p.read_text() + "\n## Amendments\n"
+                 "- **2026-07-27 — arena scope change** (`design/x.md`). The floor\n"
+                 "  rule was restated.\n", encoding="utf-8")
+    a = parse_charter(p, "Earnings-noise contrarian")["amendments"]
+    assert len(a) == 1 and a[0]["date"] == "2026-07-27"
+    assert a[0]["title"] == "arena scope change"
+    assert a[0]["text"].endswith("The floor rule was restated.")
 
 
 def test_harness_dedupes_echoed_floor_rules(tmp_path):

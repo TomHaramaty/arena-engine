@@ -125,6 +125,30 @@ create table if not exists operations (
   created_at timestamptz not null default now()
 );
 
+-- the desk (2026-07-28): what a principal files from their private page. A
+-- note is a deliberation input with standing and no authority — the agent must
+-- answer it at its next session, and may decline or refuse it with reasons.
+create table if not exists guidance (
+  id bigserial primary key,
+  agent_id text not null references agents(id),
+  cid text not null,                  -- C1, C2 … per agent
+  uid text not null,                  -- the principal who filed it
+  doc_id text not null unique,        -- the Firestore doc it arrived in
+  text text not null,
+  filed_at timestamptz not null default now(),
+  disposition text check (disposition in ('adopted','converted','declined','refused')),
+  answer text,
+  answered_run bigint references runs(id),
+  answered_at timestamptz,
+  pushed_at timestamptz,              -- the answer is back on the principal's desk
+  unique (agent_id, cid)
+);
+-- who wrote the note: the principal's own words, or the trader's summary of a
+-- conversation it decided to carry. The record must never attribute one to the
+-- other.
+alter table guidance add column if not exists author text not null default 'principal';
+create index if not exists guidance_pending on guidance(agent_id) where disposition is null;
+
 create table if not exists triggers_fired (
   id bigserial primary key,
   agent_id text not null references agents(id),

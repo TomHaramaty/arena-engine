@@ -6,7 +6,7 @@ visitor, and a running bill on a public page anchors a price on a product that
 has not set one. So they left arena.json (2026-07-28, design/trades) and live
 here instead, read straight from Postgres.
 
-This is genuinely operator-only, which an unlisted page on open-outcry.web.app
+This is genuinely operator-only, which an unlisted page on conviction-league.com
 would not have been: anything the site publishes is served to anyone who asks
 for the URL, linked or not.
 

@@ -1,7 +1,7 @@
 """Build the public data payload from DB state + git prose → site/arena.json.
 
 The workflows push arena.json to the arena-web repo, whose deploy renders
-open-outcry.web.app from it. Nothing else is published.
+conviction-league.com from it. Nothing else is published.
 
 Usage: python -m jobs.site   (needs DATABASE_URL, TRADER_REPO)
 """

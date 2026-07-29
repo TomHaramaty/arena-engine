@@ -18,7 +18,7 @@ import requests
 from jobs.ingest import fs_client
 from engine import observability as obs
 
-FLOOR_URL = os.environ.get("FLOOR_URL", "https://open-outcry.web.app/arena.json")
+FLOOR_URL = os.environ.get("FLOOR_URL", "https://conviction-league.com/arena.json")
 FLOOR_WAIT_SECONDS = int(os.environ.get("FLOOR_WAIT_SECONDS", "240"))
 FLOOR_POLL_SECONDS = int(os.environ.get("FLOOR_POLL_SECONDS", "5"))
 

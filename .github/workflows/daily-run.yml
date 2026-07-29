@@ -74,6 +74,24 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           TRADER_REPO: ${{ github.workspace }}/trader
         run: python -m jobs.site
+      # After the build, and only on the close slot: the day is complete, and a
+      # letter about half a day is a letter about nothing. Reads the build this
+      # run just produced rather than the published copy, which lags a push and
+      # a deploy. Never fails the run — the record is already written, and a
+      # letter that could not be composed must not undo that.
+      - name: Write the letters (close slot only)
+        if: always() && github.event.schedule != '50 14 * * 1-5'
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          FIRESTORE_SERVICE_ACCOUNT: ${{ secrets.FIRESTORE_SERVICE_ACCOUNT }}
+        run: |
+          hour=$(date -u +%H)
+          if [ "$hour" -lt 17 ]; then echo "open slot — letters wait for the close"; exit 0; fi
+          printf '%s' "$FIRESTORE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/fs_sa.json"
+          GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/fs_sa.json" python -m jobs.letter --send
       - name: Push data to arena-web
         if: always()
         env:

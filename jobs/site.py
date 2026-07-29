@@ -12,7 +12,7 @@ import pathlib
 import re
 from datetime import datetime, timezone
 
-from engine import db
+from engine import db, sandbox
 from engine import observability as obs
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -245,7 +245,7 @@ def order_trigger(kind, params):
     return None
 
 
-def arena_curve(conn):
+def arena_curve(conn, skip=()):
     """Equal-weight arena index across all agents, chain-linked so agents that
     join mid-history enter at the index level of their first mark instead of
     distorting it: each interval the index moves by the mean per-agent return
@@ -256,6 +256,8 @@ def arena_curve(conn):
     ).fetchall()
     by_ts = {}
     for r in rows:
+        if r["agent_id"] in skip:  # a test trader must not move the floor's index
+            continue
         by_ts.setdefault(r["ts"], {})[r["agent_id"]] = float(r["equity"])
     idx, prev, out = 100.0, {}, []
     for ts in sorted(by_ts):
@@ -330,7 +332,7 @@ def build_agent(conn, row, prices):
     bidx = bench_curve[-1]["v"] if bench_curve else 100.0
     ret = equity / INITIAL - 1
 
-    d = TRADER / "agents" / aid
+    d = sandbox.agent_dir(TRADER, aid)  # a test trader's prose is in the sandbox tree
     principles = parse_principles(d / "principles.md")
     hyps = parse_hypotheses(d / "hypotheses.md")
     journal = parse_journal(d)
@@ -420,7 +422,7 @@ def system_block(conn):
     }
 
 
-def tape_block(conn, limit=150):
+def tape_block(conn, limit=150, skip=()):
     """Every action the floor took, newest first, built only from what the
     engine wrote at the time.
 
@@ -487,6 +489,7 @@ def tape_block(conn, limit=150):
             "note": o["reason"] or "",
         })
 
+    ev = [e for e in ev if e["agent"] not in skip]  # sandbox traders are not the floor
     ev.sort(key=lambda e: e["t"], reverse=True)
     return ev[:limit]
 
@@ -494,9 +497,16 @@ def tape_block(conn, limit=150):
 def main():
     obs.init("site")
     conn = db.connect()
-    agents_rows = conn.execute(
+    rows = conn.execute(
         "select * from agents where status='active' order by id"
     ).fetchall()
+    # Sandbox traders are not the floor. They are published separately, and only
+    # so their own principal's desk can find their charter — arena-web's
+    # render.py strips the key before it bakes the floor page. See
+    # design/account-deletion-2026-07-29.md §4.1.
+    agents_rows = [r for r in rows if r["tier"] != sandbox.TIER]
+    sandbox_rows = [r for r in rows if r["tier"] == sandbox.TIER]
+    sandbox_ids = {r["id"] for r in sandbox_rows}
     prices = {
         r["symbol"]: float(r["price"])
         for r in conn.execute(
@@ -508,15 +518,17 @@ def main():
         "run_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         "initial_capital": INITIAL,
         "agents": [build_agent(conn, r, prices) for r in agents_rows],
-        "arena_curve": arena_curve(conn),
-        "tape": tape_block(conn),
+        "sandbox": [dict(build_agent(conn, r, prices), sandbox=True)
+                    for r in sandbox_rows],
+        "arena_curve": arena_curve(conn, skip=sandbox_ids),
+        "tape": tape_block(conn, skip=sandbox_ids),
         "system": system_block(conn),
     }
     site = ROOT / "site"
     site.mkdir(exist_ok=True)
     (site / "arena.json").write_text(json.dumps(data, indent=1))
-    print(f"site built: {len(data['agents'])} agents, {len(data['tape'])} tape events, "
-          f"prices {data['system']['last_update']}")
+    print(f"site built: {len(data['agents'])} agents, {len(data['sandbox'])} sandbox, "
+          f"{len(data['tape'])} tape events, prices {data['system']['last_update']}")
 
 
 if __name__ == "__main__":

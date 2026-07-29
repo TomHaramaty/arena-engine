@@ -10,6 +10,8 @@ import pathlib
 import re
 from datetime import date, datetime
 
+from engine import sandbox
+
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{2,11}$")
 SYMBOL_RE = re.compile(r"[A-Z0-9.\-]{1,12}")
 MAX_POSITION_CEILING = 35.0
@@ -415,11 +417,15 @@ def interview_md(c, app_id, today):
     )
 
 
-def write_seed_files(trader_repo, c, today, app_id):
+def write_seed_files(trader_repo, c, today, app_id, sandbox_seat=False):
     """Create agents/<id>/ prose in the trader repo. Idempotent: existing files
     are never overwritten (prose is append-only once born). Returns the list of
-    paths written."""
-    d = pathlib.Path(trader_repo) / "agents" / c["id"]
+    paths written.
+
+    sandbox_seat routes the same prose into the gitignored sandbox/agents/ tree
+    (engine/sandbox.py) — a test trader thinks out of real files that are never
+    committed and can be purged."""
+    d = sandbox.agent_dir(trader_repo, c["id"], sandbox=sandbox_seat or None)
     files = {
         d / "harness.md": harness_md(c, today),
         d / "principles.md": principles_md(c, today),

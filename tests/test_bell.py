@@ -67,3 +67,21 @@ def test_a_hiccup_reading_the_floor_is_retried(monkeypatch):
                                      floor_of("ballast", "rapid")])
     assert bell.await_floor("rapid") is True
     assert len(calls) == 2
+
+
+def test_the_bell_also_waits_for_a_sandbox_trader(monkeypatch):
+    """A test seating is published beside the floor, not on it. The wait is the
+    same wait — without this the first bell of every sandbox trader burns its
+    whole 240s cap and reports a deploy that already landed."""
+    published = FakeResponse({"agents": [{"id": "ballast"}],
+                              "sandbox": [{"id": "probe"}]})
+    patch_http(monkeypatch, [published])
+    assert bell.floor_has("probe") is True
+    assert bell.floor_has("ballast") is True
+    assert bell.floor_has("nobody") is False
+
+
+def test_a_payload_with_no_sandbox_key_still_works(monkeypatch):
+    patch_http(monkeypatch, [floor_of("ballast")])
+    assert bell.floor_has("ballast") is True
+    assert bell.floor_has("probe") is False

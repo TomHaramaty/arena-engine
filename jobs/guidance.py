@@ -24,7 +24,7 @@ import sys
 import traceback
 from datetime import datetime, timezone
 
-from engine import db
+from engine import db, sandbox
 from engine import observability as obs
 from jobs.ingest import fs_client
 
@@ -50,7 +50,7 @@ def filed_docs(fs):
 
 
 def guidance_path(agent_id):
-    return TRADER / "agents" / agent_id / "guidance.md"
+    return sandbox.agent_dir(TRADER, agent_id) / "guidance.md"
 
 
 def append_entry(agent_id, name, heading, body):
@@ -68,6 +68,7 @@ def append_entry(agent_id, name, heading, body):
 def commit(paths, message):
     """CI only: the workflows clone a fresh trader repo and hold its SSH key.
     Local runs leave the working tree for the operator to read."""
+    paths = [p for p in paths if not sandbox.in_sandbox(p)]  # never the sandbox
     if os.environ.get("GITHUB_ACTIONS") != "true" or not paths:
         print(f"  local run — {len(paths)} path(s) left uncommitted")
         return

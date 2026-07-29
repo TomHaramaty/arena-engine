@@ -170,6 +170,11 @@ def payload(arena: dict, agent_id: str, day: str) -> dict:
     agents = arena.get("agents") or []
     agent = next((a for a in agents if a.get("id") == agent_id), None)
     if agent is None:
+        # A sandbox trader is published beside the floor, not on it. It can still
+        # be sent a letter with --only; the board it reads is the real floor.
+        agent = next((a for a in (arena.get("sandbox") or [])
+                      if a.get("id") == agent_id), None)
+    if agent is None:
         raise KeyError(f"no such trader on the floor: {agent_id}")
 
     tape = arena.get("tape") or []
@@ -554,7 +559,7 @@ def main():  # pragma: no cover - orchestration, exercised end to end
     import time
     import urllib.request
 
-    from engine import db
+    from engine import db, sandbox
     from engine import observability as obs
     from jobs.ingest import fs_client
 
@@ -593,12 +598,17 @@ def main():  # pragma: no cover - orchestration, exercised end to end
 
     with db.connect() as conn:
         rows = conn.execute(
-            "select id, config, owner_uid from agents "
+            "select id, config, owner_uid, tier from agents "
             "where status='active' and owner_uid is not null order by id"
         ).fetchall()
 
     if args.only:
         rows = [r for r in rows if r["id"] == args.only]
+    else:
+        # A sandbox trader never joins the scheduled post — its facts come from
+        # arena.json's `sandbox` key, which `payload` does not read. Name it with
+        # --only to exercise the letter deliberately.
+        rows = [r for r in rows if r["tier"] != sandbox.TIER]
 
     for row in rows:
         aid = row["id"]

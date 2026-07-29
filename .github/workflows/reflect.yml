@@ -48,6 +48,22 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           TRADER_REPO: ${{ github.workspace }}/trader
         run: python -m jobs.site
+      # The weekly letter rides the reflection, not the Friday close: reflection
+      # is when a hypothesis is promoted or falsified and the rulebook actually
+      # changes. "Here is what I changed my mind about" is the product's thesis
+      # in an inbox; five daily letters stapled together is filler.
+      - name: Write the weekly letters
+        if: always()
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          FIRESTORE_SERVICE_ACCOUNT: ${{ secrets.FIRESTORE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$FIRESTORE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/fs_sa.json"
+          GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/fs_sa.json" \
+            python -m jobs.letter --reflection --send
       - name: Push data to arena-web
         if: always()
         env:

@@ -308,3 +308,165 @@ def test_delivery_posts_the_message_and_never_the_key_in_the_body():
     assert status == 200 and out["id"] == "abc"
     assert seen["headers"]["Authorization"] == "Bearer re_test"
     assert "re_test" not in str(seen["body"])
+
+
+# --------------------------------------------------- silence, and the voice pass
+
+from jobs.letter import (  # noqa: E402
+    SILENT_FRIDAYS_BEFORE_SPEAKING, facts_for_voice, quiet_weeks, voice_pass,
+)
+
+WEEK = 7 * 86400
+
+
+def test_quiet_weeks_counts_from_the_last_thing_that_happened():
+    assert quiet_weeks(TAPE, "catalyst", 300 + 3 * WEEK) == 3
+    assert quiet_weeks(TAPE, "catalyst", 300) == 0
+
+
+def test_a_trader_that_never_acted_is_not_reported_as_silent_forever():
+    """No events at all is a newborn, not a lapsed trader."""
+    assert quiet_weeks(TAPE, "nobody", 10**9) == 0
+
+
+def test_silence_stays_quiet_below_the_threshold():
+    assert eligible("daily", [], silent_fridays=1)[0] is False
+
+
+def test_after_enough_silence_the_trader_speaks_anyway():
+    send, why = eligible("daily", [], silent_fridays=SILENT_FRIDAYS_BEFORE_SPEAKING)
+    assert send is True
+    assert "still waiting" in why and "silence is not a status" in why
+
+
+def test_silence_never_overrides_a_principal_who_turned_letters_off():
+    assert eligible("off", [], silent_fridays=99)[0] is False
+
+
+def test_the_voice_prompt_carries_the_charter_voice_not_an_invented_one():
+    p = _p()
+    assert p["agent"]["voice"] == ""  # the fixture has no charter block
+    facts = facts_for_voice(p)
+    assert "sell V" in facts and "H1" in facts
+
+
+def test_facts_for_voice_never_hands_the_model_a_price():
+    """It cannot state a figure it was never shown."""
+    facts = facts_for_voice(_p())
+    assert "366.04" not in facts and "361.89" not in facts
+
+
+def test_facts_say_plainly_when_nothing_happened():
+    assert "nothing was traded today" in facts_for_voice(payload(ARENA, "vertex", "Jul 28"))
+
+
+def test_the_voice_pass_refuses_a_model_that_states_a_number():
+    bad = lambda _prompt: {"subject": "s", "preheader": "p", "line": "I sold V at 366.04",  # noqa: E731
+                           "why": "w", "belief": "b", "beliefTie": ""}
+    with pytest.raises(ProseStatesQuantity):
+        voice_pass(_p(), call=bad)
+
+
+def test_the_voice_pass_keeps_only_the_fields_the_letter_uses():
+    chatty = lambda _p: {"subject": "s", "preheader": "p", "line": "l", "why": "w",  # noqa: E731
+                         "belief": "b", "beliefTie": "", "extra": "ignored", "note": "also ignored"}
+    out = voice_pass(_p(), call=chatty)
+    assert set(out) == {"subject", "preheader", "line", "why", "belief", "beliefTie"}
+
+
+def test_the_voice_pass_rejects_a_model_that_returns_nothing_useful():
+    with pytest.raises(ProseStatesQuantity):
+        voice_pass(_p(), call=lambda _p: "not an object")
+
+
+# ------------------------------------- keeping figures away from the model
+
+from jobs.letter import deprice, first_json_object  # noqa: E402
+
+
+def test_deprice_strips_prices_from_recorded_prose():
+    out = deprice("EPS ($3.32 vs $3.22 est) and revenue ($11.63B vs $11.38B est) beat")
+    assert "3.32" not in out and "11.63" not in out
+
+
+def test_deprice_keeps_the_rule_the_trader_cited():
+    """The placeholder must carry no digit of its own, or the stripper eats the
+    very thing it protects — observed as 'Per Principle P2' becoming
+    'Per Principle —'."""
+    out = deprice("Per Principle P2 and Hypothesis H1, the edge dissipated")
+    assert "P2" in out and "H1" in out
+
+
+def test_deprice_handles_dates_and_percentages():
+    out = deprice("on July 28, 2026 the hit rate fell below 55% for 8 cases")
+    assert not any(c.isdigit() for c in out.replace("P", "").replace("H", ""))
+
+
+def test_deprice_survives_empty_and_none():
+    assert deprice("") == "" and deprice(None) == ""
+
+
+def test_the_model_is_never_shown_a_figure():
+    """The whole prompt, not just the fill line."""
+    import re as _re
+    facts = facts_for_voice(_p())
+    stray = _re.findall(r"(?<![PHC])\b\d+", facts)
+    assert stray == [], f"the model can see {stray}"
+
+
+def test_a_position_count_is_words_not_a_number():
+    assert "a couple of position" in facts_for_voice(_p())
+
+
+def test_first_json_object_reads_a_plain_reply():
+    assert first_json_object('{"line": "hello"}')["line"] == "hello"
+
+
+def test_first_json_object_survives_fences_and_a_trailing_sentence():
+    """Asked for JSON, a model still sometimes fences it or adds a remark —
+    a hard parse error would drop an otherwise fine letter."""
+    assert first_json_object('```json\n{"line": "hi"}\n```')["line"] == "hi"
+    assert first_json_object('{"line": "hi"}\nHope that helps!')["line"] == "hi"
+
+
+def test_first_json_object_is_not_fooled_by_a_brace_inside_a_string():
+    assert first_json_object('{"line": "a } brace", "why": "w"}')["why"] == "w"
+
+
+def test_first_json_object_raises_on_a_truncated_reply():
+    with pytest.raises(ValueError, match="unterminated"):
+        first_json_object('{"line": "cut off here')
+
+
+def test_first_json_object_raises_when_there_is_no_object():
+    with pytest.raises(ValueError, match="no json"):
+        first_json_object("I could not write this letter.")
+
+
+def test_the_voice_pass_asks_again_after_a_bad_reply():
+    """Replies are stochastic — one arriving truncated must not lose the letter."""
+    calls = []
+
+    def flaky(_prompt):
+        calls.append(1)
+        if len(calls) == 1:
+            raise ValueError("unterminated json object in the model reply")
+        return {"subject": "s", "preheader": "p", "line": "l", "why": "w",
+                "belief": "b", "beliefTie": ""}
+
+    assert voice_pass(_p(), call=flaky)["line"] == "l"
+    assert len(calls) == 2
+
+
+def test_a_model_that_keeps_stating_numbers_loses_the_letter():
+    """Asking again is allowed; editing a bad reply into a good one is not."""
+    attempts = []
+
+    def stubborn(_prompt):
+        attempts.append(1)
+        return {"subject": "s", "preheader": "p", "line": "I made 12 per cent",
+                "why": "w", "belief": "b", "beliefTie": ""}
+
+    with pytest.raises(ProseStatesQuantity):
+        voice_pass(_p(), call=stubborn)
+    assert len(attempts) > 1  # it tried again before giving up

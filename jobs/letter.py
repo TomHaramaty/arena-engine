@@ -77,8 +77,30 @@ def day_events(tape: list, agent_id: str, day: str) -> list:
     ]
 
 
+#: After this many consecutive silent Fridays, the Friday letter goes out
+#: anyway and says so. Ruling 1 means a patient trader can write nothing for
+#: weeks — Ballast sits in cash by design until the VIX reaches 25 — and to a
+#: principal, silence is indistinguishable from a broken product. Waiting is a
+#: real result and gets reported as one rather than hidden.
+SILENT_FRIDAYS_BEFORE_SPEAKING = 2
+
+
+def quiet_weeks(tape: list, agent_id: str, now_t: int) -> int:
+    """Whole weeks since this trader last did anything on the record.
+
+    Read from the tape rather than tracked in a table: the tape already IS the
+    history of what happened, so nothing can drift out of step with it.
+    """
+    times = [e.get("t", 0) for e in tape
+             if e.get("agent") == agent_id and e.get("event") in EVENT_KINDS]
+    if not times:
+        return 0
+    return max(0, int((now_t - max(times)) // (7 * 86400)))
+
+
 def eligible(cadence: str, events: list, *, is_reflection_day: bool = False,
-             answered_guidance: int = 0, rulebook_changed: bool = False) -> tuple:
+             answered_guidance: int = 0, rulebook_changed: bool = False,
+             silent_fridays: int = 0) -> tuple:
     """Should a letter go out? Returns (send: bool, reason: str).
 
     The reason is returned rather than logged so callers can record WHY a
@@ -95,14 +117,16 @@ def eligible(cadence: str, events: list, *, is_reflection_day: bool = False,
     if cadence == "weekly":
         if not is_reflection_day:
             return False, "weekly: not the reflection day"
-        if not (happened or is_reflection_day):
-            return False, "weekly: nothing happened this week"
         return True, "weekly: the reflection ran"
 
     # daily — ruling 1: only on a day something actually happened
     if is_reflection_day:
         return True, "the reflection ran"
     if not happened:
+        # ...except that going quiet indefinitely reads as breakage. On a
+        # Friday, after enough silence, say so.
+        if silent_fridays >= SILENT_FRIDAYS_BEFORE_SPEAKING:
+            return True, f"still waiting — {silent_fridays} quiet weeks, and silence is not a status"
         return False, "nothing happened on the record today"
     if answered_guidance:
         return True, "the trader answered its principal"
@@ -166,6 +190,10 @@ def payload(arena: dict, agent_id: str, day: str) -> dict:
             "name": agent.get("name"),
             "archetype": agent.get("archetype"),
             "chartered_by": agent.get("chartered_by") or "the house",
+            # the voice is the principal's, authored at the interview — the
+            # letter speaks in it rather than inventing one
+            "voice": (agent.get("charter") or {}).get("voice") or "",
+            "credo": (agent.get("charter") or {}).get("credo") or "",
         },
         "day": day,
         "fills": fills,
@@ -488,13 +516,25 @@ def deliver(msg, api_key, post=None):
         raise RuntimeError("RESEND_API_KEY is not set; refusing to pretend a letter was sent")
     if post is None:  # pragma: no cover - exercised only against the real API
         import json as _json
+        import urllib.error
         import urllib.request
 
         def post(url, headers, body):
+            # Resend sits behind Cloudflare, which blocks urllib's default
+            # "Python-urllib/3.x" signature outright — it answers 403 with
+            # "error code: 1010", which looks like a permissions problem and
+            # is not one. Announce a real client.
+            headers = {**headers, "User-Agent": "conviction-league-engine/1.0"}
             req = urllib.request.Request(url, data=_json.dumps(body).encode(),
                                          headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=30) as r:
-                return r.status, _json.loads(r.read().decode())
+            try:
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    return r.status, _json.loads(r.read().decode())
+            except urllib.error.HTTPError as e:
+                # the provider's own words, or a bare status is all the CI log
+                # ever shows and nobody can act on "403 Forbidden"
+                detail = e.read().decode("utf-8", "replace")[:400]
+                raise RuntimeError(f"resend refused ({e.code}): {detail}") from None
 
     return post(RESEND_URL,
                 {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -511,20 +551,41 @@ def main():  # pragma: no cover - orchestration, exercised end to end
     import argparse
     import json
     import os
+    import time
     import urllib.request
 
     from engine import db
     from engine import observability as obs
     from jobs.ingest import fs_client
 
+    from datetime import datetime, timezone
+
     ap = argparse.ArgumentParser()
-    ap.add_argument("--day", required=True, help='tape day label, e.g. "Jul 28"')
+    ap.add_argument("--day", help='tape day label, e.g. "Jul 28" (default: today, UTC)')
+    ap.add_argument("--arena", default="site/arena.json",
+                    help="the build this run produced; falls back to the published file")
     ap.add_argument("--reflection", action="store_true", help="a reflection ran today")
-    ap.add_argument("--dry", action="store_true", help="decide and render, send nothing")
+    # Sending is opt-IN. These letters go to real people's inboxes, and the
+    # recipients are third parties, not whoever is running the command. A job
+    # that mails strangers by default is one keystroke from an accident — this
+    # was very nearly one.
+    ap.add_argument("--send", action="store_true",
+                    help="actually deliver; without it nothing leaves the machine")
+    ap.add_argument("--only", help="restrict to one trader id — use when testing")
     args = ap.parse_args()
 
-    with urllib.request.urlopen(f"{SITE}/arena.json", timeout=30) as r:
-        arena = json.loads(r.read().decode())
+    # tlabel() in jobs/site.py stamps the tape "%b %d %H:%M", so the day
+    # prefix is "%b %d" — zero-padded, matching it exactly
+    day = args.day or datetime.now(timezone.utc).strftime("%b %d")
+
+    # Read the build this run just produced, NOT the published copy. The
+    # published one lags a push and a deploy, and a letter that waits on CI is
+    # a letter that races it.
+    if os.path.exists(args.arena):
+        arena = json.loads(open(args.arena, encoding="utf-8").read())
+    else:
+        with urllib.request.urlopen(f"{SITE}/arena.json", timeout=30) as r:
+            arena = json.loads(r.read().decode())
 
     fs = fs_client()
     key = os.environ.get("RESEND_API_KEY", "")
@@ -536,15 +597,23 @@ def main():  # pragma: no cover - orchestration, exercised end to end
             "where status='active' and owner_uid is not null order by id"
         ).fetchall()
 
+    if args.only:
+        rows = [r for r in rows if r["id"] == args.only]
+
     for row in rows:
         aid = row["id"]
         cfg = row["config"] if isinstance(row["config"], dict) else json.loads(row["config"] or "{}")
         updates = (cfg.get("updates") or {})
         cadence = updates.get("cadence", "daily")
         try:
-            p = payload(arena, aid, args.day)
-            send, why = eligible(cadence, day_events(arena.get("tape") or [], aid, args.day),
-                                 is_reflection_day=args.reflection)
+            p = payload(arena, aid, day)
+            tape = arena.get("tape") or []
+            # NOT `quiet`: that is the running counter, and shadowing it made
+            # the summary report one silent trader when three had been silent
+            quiet_wk = quiet_weeks(tape, aid, int(time.time())) if args.reflection else 0
+            send, why = eligible(cadence, day_events(tape, aid, day),
+                                 is_reflection_day=args.reflection,
+                                 silent_fridays=quiet_wk)
             if not send:
                 quiet += 1
                 print(f"  {aid}: quiet — {why}")
@@ -556,7 +625,7 @@ def main():  # pragma: no cover - orchestration, exercised end to end
                 continue
             prose = voice_pass(p)  # the model writes connective prose only
             msg = envelope(p, prose, to)
-            if args.dry:
+            if not args.send:
                 print(f"  {aid}: WOULD SEND to {to} — {why} — {len(msg['html'])} bytes")
                 continue
             status, body = deliver(msg, key)
@@ -569,20 +638,214 @@ def main():  # pragma: no cover - orchestration, exercised end to end
             failed += 1
             print(f"  {aid}: failed — {e}")
 
-    print(f"letters: {sent} sent, {quiet} quiet, {failed} failed")
+    print(f"letters: {sent} sent, {quiet} quiet, {failed} failed"
+          + ("" if args.send else "  (dry — pass --send to deliver)"))
     obs.heartbeat("letters", ok=failed == 0) if hasattr(obs, "heartbeat") else None
 
 
-def voice_pass(p):  # pragma: no cover - model call, wired in the next step
-    """The one model call: connective prose, never a quantity.
+VOICE_PROMPT = """You are {name}, an autonomous trader on Conviction League. \
+You are writing the short prose of today's letter to your principal — the \
+person whose answers became your charter.
 
-    Not yet wired to a brain. Until it is, a letter cannot be composed, and
-    that is deliberate — the alternative is a template pretending to be a
-    trader's voice.
+Your voice, authored by them at your interview: {voice}
+Your credo: {credo}
+
+## What is true today. These are the ONLY facts. Do not add any others.
+{facts}
+
+## The one hard rule
+You must NOT write any number, price, percentage, quantity or date. Not one \
+digit. Every figure is printed by the letter itself, beside your words — if \
+you write one it will be wrong, and the letter will be refused and never sent.
+Refer to amounts in words instead: "a little over one per cent", "most of the \
+book", "a modest gain". You MAY cite your own rules and tests by their \
+identifier — P2, H1 — because those name the record rather than describe it.
+
+Write in the FIRST PERSON. Report; never advise, never predict, never \
+recommend. Be specific and unhurried. No exclamation marks, no emoji.
+
+Respond with ONLY a json object:
+{{"subject": "a subject line, under nine words, no numbers",
+  "preheader": "one sentence, the inbox preview",
+  "line": "one or two sentences: what I did today and why. This is the whole \
+personality budget.",
+  "why": "two to four sentences: the reasoning, citing the rule or test that \
+governed it",
+  "belief": "one sentence stating the belief I am testing, in plain words",
+  "beliefTie": "one sentence tying today to that belief, or empty if today \
+had nothing to do with it"}}"""
+
+
+#: Anything that looks like a figure: 3.32, 11.63B, 55%, $366.04, 2026-07-28.
+_NUMBERISH = re.compile(r"\$?\d[\d,.:/-]*\s*(?:%|bn|b|m|k|B|M|K)?", re.I)
+
+
+def deprice(text: str, limit: int = 420) -> str:
+    """Strip every figure out of recorded prose before a model reads it.
+
+    The trader's own note explains WHY it acted, which is exactly what the
+    letter needs — but it is also full of prices, and a model shown a price
+    will eventually repeat one. Since `no_quantities` then refuses the letter,
+    a model that can see figures is a model that produces no letters at all.
+    So it gets the reasoning with the numbers taken out; the letter prints the
+    real ones itself, beside the words.
+
+    Record identifiers survive — a rule the trader cited must stay citable.
     """
-    raise NotImplementedError(
-        "voice_pass: the model writes prose with no digits; wire to the brain runner"
+    # the placeholder must contain NO digit of its own, or the stripper below
+    # eats the very thing it is protecting (observed: "Per Principle P2"
+    # became "Per Principle —")
+    kept = {m.group(0): "\x00" + "Z" * (i + 1) + "\x00"
+            for i, m in enumerate(RECORD_ID.finditer(text or ""))}
+    s = text or ""
+    for original, token in kept.items():
+        s = s.replace(original, token)
+    s = _NUMBERISH.sub("—", s)
+    for original, token in kept.items():
+        s = s.replace(token, original)
+    return re.sub(r"\s+", " ", s).strip()[:limit]
+
+
+def facts_for_voice(p) -> str:
+    """The day in words, for the model to write ABOUT — never to copy from.
+
+    Every figure is removed before the model sees anything. It has no reason to
+    need one: the letter prints every number itself.
+    """
+    out = []
+    for f in p["fills"]:
+        line = f"- {f.get('side')} {f.get('symbol')}"
+        rt = f.get("round_trip")
+        if rt:
+            d = "gain" if rt["ret"] >= 0 else "loss"
+            size = "small" if abs(rt["ret"]) < 0.02 else "sizeable"
+            line += f", closing a position opened earlier, for a {size} {d}"
+        if f.get("note"):
+            line += f". Reason on the record: {deprice(f['note'])}"
+        out.append(line)
+    for x in p["pulled"]:
+        out.append(f"- a resting {x.get('mechanism')} on {x.get('symbol')} was cancelled")
+    for x in p["blocked"]:
+        out.append(f"- an order in {x.get('symbol')} was REFUSED by your constitution: {x.get('note')}")
+    if not out:
+        out.append("- nothing was traded today; the book is unchanged")
+    h = p.get("hypothesis")
+    if h:
+        out.append(f"- the belief you are testing ({h.get('id')}): {deprice(h.get('statement'))}")
+        out.append(f"  its prediction: {deprice(h.get('prediction'))}")
+        out.append(f"  it dies if: {deprice(h.get('falsifier'))}")
+    # even a count is a figure the model could repeat, and it does not need one
+    n = len(p["positions"])
+    how_many = {0: "no", 1: "a single", 2: "a couple of"}.get(n, "several")
+    out.append(f"- you hold {how_many} position(s); "
+               f"{'you are ahead of' if (p['stand'].get('alpha') or 0) >= 0 else 'you are behind'} your benchmark")
+    return "\n".join(out)
+
+
+VOICE_MODEL = "gemini-3.1-pro-preview"
+
+#: A reply can arrive truncated or with a figure in it. Ask again rather than
+#: repair it; give up after this many and send nothing.
+VOICE_ATTEMPTS = 3
+
+
+def first_json_object(text: str) -> dict:
+    """The first complete JSON object in a model reply.
+
+    Even asked for JSON, a model may wrap it in fences or add a sentence after
+    the closing brace — which is a hard parse error, and one that would drop a
+    letter that was otherwise fine. Scanning for the first balanced object is
+    the smaller evil; anything genuinely malformed still raises.
+    """
+    import json as _json
+
+    s = (text or "").strip()
+    if s.startswith("```"):
+        s = re.sub(r"^```[a-z]*\s*|\s*```$", "", s, flags=re.I | re.S).strip()
+    start = s.find("{")
+    if start < 0:
+        raise ValueError("no json object in the model reply")
+    depth, in_str, esc = 0, False, False
+    for i, ch in enumerate(s[start:], start):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return _json.loads(s[start:i + 1])
+    raise ValueError("unterminated json object in the model reply")
+
+
+def _ask_model(prompt):  # pragma: no cover - the real brain
+    import os
+
+    import requests
+
+    r = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{VOICE_MODEL}:generateContent",
+        headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"], "Content-Type": "application/json"},
+        json={"contents": [{"parts": [{"text": prompt}]}],
+              "generationConfig": {"response_mime_type": "application/json", "maxOutputTokens": 16384}},
+        timeout=300,
     )
+    r.raise_for_status()
+    cand = (r.json().get("candidates") or [{}])[0]
+    why = cand.get("finishReason", "")
+    parts = (cand.get("content") or {}).get("parts") or []
+    text = "".join(part.get("text", "") for part in parts)
+    if not text:
+        raise ValueError(f"the voice pass produced no text (finishReason={why!r})")
+    try:
+        return first_json_object(text)
+    except ValueError as e:
+        # a truncated reply is a budget problem, not a malformed one; say which
+        raise ValueError(f"{e} (finishReason={why!r}, {len(text)} chars)") from e
+
+
+def voice_pass(p, call=None):
+    """The one model call. Connective prose only — and it is verified, not trusted.
+
+    The model is asked for no digits and then checked for them. A refusal here
+    stops the letter; it never degrades to a template, because a template
+    wearing a trader's voice is worse than no letter at all.
+    """
+    if call is None:  # pragma: no cover - the real brain
+        call = _ask_model
+
+    a = p["agent"]
+    prompt = VOICE_PROMPT.format(
+        name=a["name"], voice=a.get("voice") or "plain and specific",
+        credo=a.get("credo") or "", facts=facts_for_voice(p),
+    )
+
+    # Asking again is not repairing. The reply is stochastic — an occasional
+    # one arrives truncated, or with a number in it — and a second ask costs a
+    # fraction of a cent. What is NOT allowed is editing a bad reply into a
+    # good one: after the last attempt the letter is refused and nothing is
+    # sent, which is the design's whole point.
+    last = None
+    for _ in range(VOICE_ATTEMPTS):
+        try:
+            prose = call(prompt)
+            if not isinstance(prose, dict):
+                raise ProseStatesQuantity("the voice pass returned no object")
+            prose = {k: str(v or "") for k, v in prose.items()
+                     if k in ("subject", "preheader", "line", "why", "belief", "beliefTie")}
+            no_quantities(prose)
+            return prose
+        except (ProseStatesQuantity, ValueError) as e:
+            last = e
+    raise last
 
 
 if __name__ == "__main__":  # pragma: no cover

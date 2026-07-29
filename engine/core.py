@@ -212,9 +212,10 @@ def insert_ticks(conn, quotes):
     with conn.cursor() as cur:
         for sym, q in quotes.items():
             cur.execute(
-                """insert into ticks (symbol, ts, price, prev_close)
-                   values (%s, %s, %s, %s) on conflict do nothing""",
-                (sym, q["ts"], q["price"], q["prev_close"]),
+                """insert into ticks (symbol, ts, price, prev_close, high, low, day_open)
+                   values (%s, %s, %s, %s, %s, %s, %s) on conflict do nothing""",
+                (sym, q["ts"], q["price"], q["prev_close"],
+                 q.get("high"), q.get("low"), q.get("open")),
             )
     conn.commit()
 
@@ -333,12 +334,118 @@ def triggered(kind, side, params, price):
     return False
 
 
+def order_trigger_price(kind, side, params):
+    """The price level this order fires at, as its params stand right now.
+    For a trailing stop that is the level implied by the CURRENT high water —
+    callers deciding whether a past window touched it must ask before raising
+    the water with anything from that same window."""
+    if kind == "trailing_stop":
+        return float(params["high_water"]) * (1 - float(params["trail_pct"]))
+    if kind == "stop":
+        return float(params["trigger_price"])
+    return float(params["limit_price"])
+
+
+def fires_downward(kind, side):
+    """stop/sell, trailing_stop and limit/buy fire when the market falls to
+    them; stop/buy and limit/sell fire when it rises."""
+    if kind == "trailing_stop":
+        return True
+    if kind == "stop":
+        return side == "sell"
+    return side == "buy"
+
+
+def range_fire(kind, side, params, sess):
+    """Was this order's trigger touched inside the unobserved gap since the
+    last look — and if so, at what price does it honestly fill?
+
+    The tick samples the market roughly hourly. Measured on the record
+    (2026-07-29): 37% of a session's price range fell between samples, and
+    the stops that fired had executed an average 1.19% past their own trigger
+    against a modelled cost of 0.15%. The data source's /quote already
+    reports the session high and low, so a touch is observable even when no
+    sample landed on it.
+
+    No hindsight: the session extremes are cumulative, so an order must never
+    fire on an extreme printed before the engine first saw the order. params
+    carries the baseline — seen_session / seen_high / seen_low, stamped when
+    the order first meets each session:
+
+      · first observation ever → stamp the baseline, no range fire (the
+        current-price check still applies);
+      · same session, later tick → fire only on a NEW extreme, beyond the
+        baseline, that reaches the trigger — and fill AT the trigger, since
+        the touch happened between looks, not at the sampled last price;
+      · a fresh session for an order that lived through the close → the whole
+        session is fair game, and if the market gapped straight through the
+        trigger at the open, fill at the open. That is what really happens,
+        and it is the conservative direction (ruled 2026-07-29).
+
+    sess: {date, high, low, open}. Returns (fill_basis_or_None, new_baseline)
+    — new_baseline must be persisted onto the order either way, so the next
+    look knows what this one saw.
+    """
+    baseline = {
+        "seen_session": sess["date"],
+        "seen_high": sess["high"],
+        "seen_low": sess["low"],
+    }
+    seen = params.get("seen_session")
+    trig = order_trigger_price(kind, side, params)
+    down = fires_downward(kind, side)
+
+    if seen is None:
+        # Everything printed so far predates the engine knowing this order.
+        return None, baseline
+
+    if seen == sess["date"]:
+        if down:
+            if sess["low"] <= trig and sess["low"] < float(params["seen_low"]):
+                return trig, baseline
+        else:
+            if sess["high"] >= trig and sess["high"] > float(params["seen_high"]):
+                return trig, baseline
+        return None, baseline
+
+    # The order lived through into a new session.
+    if down and sess["low"] <= trig:
+        return (sess["open"] if sess["open"] <= trig else trig), baseline
+    if not down and sess["high"] >= trig:
+        return (sess["open"] if sess["open"] >= trig else trig), baseline
+    return None, baseline
+
+
+def session_of(quote):
+    """The session view of a quote, or None when the range must not be used:
+    crypto reports a rolling 24h window (session_range False), and a payload
+    missing any of high/low/open cannot support a touch decision."""
+    if not quote.get("session_range", False):
+        return None
+    if not (quote.get("high") and quote.get("low") and quote.get("open")):
+        return None
+    return {
+        "date": quote["ts"].date().isoformat(),
+        "high": float(quote["high"]),
+        "low": float(quote["low"]),
+        "open": float(quote["open"]),
+    }
+
+
 def evaluate_standing_orders(conn, quotes, now=None):
     """Walk open stop/trailing/limit orders against fresh quotes; execute what
     triggers. Each execution also files a triggers_fired row so the dispatcher
-    can wake the owning brain."""
+    can wake the owning brain.
+
+    An order fires two ways. The range check asks whether the session's
+    high/low touched the trigger since the last look, and fills at the trigger
+    (or the open, on a gap) — see range_fire for the no-hindsight baseline.
+    The last-price check is the fallback for whatever the range cannot cover:
+    crypto's rolling window, a payload without extremes, and an order meeting
+    the engine for the first time already past its trigger."""
     now = now or datetime.now(timezone.utc)
-    filled = []
+    filled = []       # (order, fill basis, qty) — the caller's view
+    fired_meta = []   # (order, basis, qty, via, trigger) — for the audit row
     with conn.cursor() as cur:
         cur.execute(
             "select * from orders where status='open' and kind in ('stop','trailing_stop','limit')"
@@ -349,26 +456,61 @@ def evaluate_standing_orders(conn, quotes, now=None):
     for o in open_orders:
         if o["symbol"] not in quotes:
             continue
-        price = quotes[o["symbol"]]["price"]
+        q = quotes[o["symbol"]]
+        price = q["price"]
         params = o["params"] or {}
+        sess = session_of(q)
+        updates = {}
+
+        # The touch decision must use the trigger as it stood BEFORE this
+        # window — a high printed in the same unobserved gap as the low must
+        # not raise a trailing stop onto a level that may not have existed
+        # when the low printed. So: range check first, water raises after.
+        trig = order_trigger_price(o["kind"], o["side"], params)
+        basis = via = None
+        if sess:
+            basis, baseline = range_fire(o["kind"], o["side"], params, sess)
+            if basis is not None:
+                via = "gap-open" if basis != trig else "range"
+            for k, v in baseline.items():
+                if params.get(k) != v:
+                    updates[k] = v
+
         if o["kind"] == "trailing_stop":
             hw = max(float(params["high_water"]), price)
+            # A session high raises the water only when it is live knowledge:
+            # printed in a session this order was already being watched in
+            # (not before the engine first saw it — that would be hindsight).
+            prev_seen = params.get("seen_session")
+            if sess and prev_seen is not None and (
+                prev_seen != sess["date"]
+                or sess["high"] > float(params.get("seen_high") or 0)
+            ):
+                hw = max(hw, sess["high"])
             if hw != float(params["high_water"]):
-                conn.execute(
-                    "update orders set params = params || %s::jsonb where id=%s",
-                    (json.dumps({"high_water": hw}), o["id"]),
-                )
+                updates["high_water"] = hw
                 params = {**params, "high_water": hw}
-        if not triggered(o["kind"], o["side"], params, price):
+
+        if updates:
+            conn.execute(
+                "update orders set params = params || %s::jsonb where id=%s",
+                (json.dumps(updates), o["id"]),
+            )
+            params = {**params, **updates}
+
+        if basis is None and triggered(o["kind"], o["side"], params, price):
+            basis, via = price, "last"
+        if basis is None:
             continue
         qty = (
-            _execute_sell(conn, o, price, now)
+            _execute_sell(conn, o, basis, now)
             if o["side"] == "sell"
-            else _execute_buy(conn, o, price, now, configs.get(o["agent_id"], {}))
+            else _execute_buy(conn, o, basis, now, configs.get(o["agent_id"], {}))
         )
         if qty:
-            filled.append((o, price, qty))
-    for o, price, qty in filled:
+            filled.append((o, basis, qty))
+            fired_meta.append((o, basis, qty, via, trig))
+    for o, basis, qty, via, trig in fired_meta:
         conn.execute(
             """insert into triggers_fired (agent_id, kind, details, ts)
                values (%s, 'stop_filled', %s, %s)""",
@@ -376,7 +518,8 @@ def evaluate_standing_orders(conn, quotes, now=None):
                 o["agent_id"],
                 json.dumps(
                     {"order_id": o["id"], "symbol": o["symbol"], "kind": o["kind"],
-                     "side": o["side"], "qty": qty, "price": price}
+                     "side": o["side"], "qty": qty, "price": basis,
+                     "via": via, "trigger_price": trig}
                 ),
                 now,
             ),

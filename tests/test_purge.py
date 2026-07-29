@@ -74,12 +74,19 @@ def _cleaned():
 class FakeConn:
     """Counts by table, and records every statement executed."""
 
-    def __init__(self, tier="test", counts=None):
+    def __init__(self, tier="test", counts=None, others=()):
         self.tier = tier
         self.counts = counts or {}
+        self.others = list(others)
         self.sql = []
         self._last = None
         self.commits = 0
+
+    def fetchall(self):
+        sql, _ = self._last
+        if "where owner_uid" in sql:
+            return [{"id": i} for i in self.others]
+        return []
 
     def execute(self, sql, params=None):
         self.sql.append((" ".join(sql.split()), params))
@@ -122,7 +129,7 @@ def test_a_real_trader_cannot_be_purged_even_with_auth(monkeypatch):
 def test_dry_run_writes_nothing(monkeypatch, capsys):
     conn = FakeConn(counts={"runs": 3, "fills": 2})
     monkeypatch.setattr(purge.db, "connect", lambda: conn)
-    monkeypatch.setattr(purge, "fs_docs", lambda *a: [])
+    monkeypatch.setattr(purge, "fs_docs", lambda *a, **k: [])
     assert purge.main(["--trader", "probe"]) == 0
     out = capsys.readouterr().out
     assert "dry run" in out and "PURGE" in out
@@ -133,7 +140,7 @@ def test_dry_run_writes_nothing(monkeypatch, capsys):
 def test_purge_deletes_children_before_parents(monkeypatch, tmp_path):
     conn = FakeConn()
     monkeypatch.setattr(purge.db, "connect", lambda: conn)
-    monkeypatch.setattr(purge, "fs_docs", lambda *a: [])
+    monkeypatch.setattr(purge, "fs_docs", lambda *a, **k: [])
     monkeypatch.setattr(purge, "TRADER", tmp_path)
     purge.main(["--trader", "probe", "--yes"])
     deletes = [s for s, _ in conn.sql if s.lower().startswith("delete")]
@@ -148,7 +155,7 @@ def test_purge_deletes_children_before_parents(monkeypatch, tmp_path):
 def test_purge_never_touches_shared_data(monkeypatch, tmp_path):
     conn = FakeConn()
     monkeypatch.setattr(purge.db, "connect", lambda: conn)
-    monkeypatch.setattr(purge, "fs_docs", lambda *a: [])
+    monkeypatch.setattr(purge, "fs_docs", lambda *a, **k: [])
     monkeypatch.setattr(purge, "TRADER", tmp_path)
     purge.main(["--trader", "probe", "--yes"])
     joined = " ".join(s for s, _ in conn.sql)
@@ -165,7 +172,7 @@ def test_purge_removes_the_sandbox_tree_only(monkeypatch, tmp_path):
 
     conn = FakeConn()
     monkeypatch.setattr(purge.db, "connect", lambda: conn)
-    monkeypatch.setattr(purge, "fs_docs", lambda *a: [])
+    monkeypatch.setattr(purge, "fs_docs", lambda *a, **k: [])
     monkeypatch.setattr(purge, "TRADER", tmp_path)
     purge.main(["--trader", "probe", "--yes"])
     assert not sb.exists()
@@ -180,7 +187,7 @@ def test_purge_refuses_a_prose_dir_outside_the_sandbox(monkeypatch, tmp_path):
     (d / "harness.md").write_text("x")
     conn = FakeConn()
     monkeypatch.setattr(purge.db, "connect", lambda: conn)
-    monkeypatch.setattr(purge, "fs_docs", lambda *a: [])
+    monkeypatch.setattr(purge, "fs_docs", lambda *a, **k: [])
     monkeypatch.setattr(purge, "TRADER", tmp_path)
     with pytest.raises(SystemExit) as e:
         purge.main(["--trader", "probe", "--yes"])
@@ -198,7 +205,7 @@ def test_retire_deletes_no_rows_and_no_prose(monkeypatch, tmp_path):
     (d / "2026-07-28.md").write_text("a real entry")
     conn = FakeConn(tier="seated")
     monkeypatch.setattr(purge.db, "connect", lambda: conn)
-    monkeypatch.setattr(purge, "fs_docs", lambda *a: [])
+    monkeypatch.setattr(purge, "fs_docs", lambda *a, **k: [])
     monkeypatch.setattr(purge, "TRADER", tmp_path)
     purge.main(["--trader", "probe", "--retire", "--yes"])
     assert not any(s.lower().startswith("delete") for s, _ in conn.sql)
@@ -296,3 +303,94 @@ def test_the_sandbox_is_never_committed(monkeypatch, tmp_path, capsys):
     ingest.commit_trader([tmp_path / "sandbox" / "agents" / "probe" / "harness.md"],
                          "probe", TODAY)
     assert calls == []
+
+
+# ---------- admin by address ----------
+
+def test_an_admin_is_recognised_by_email(monkeypatch):
+    """The uid cannot be the key: the test loop deletes its Auth user, so every
+    cycle signs in with a new uid and the same address."""
+    monkeypatch.setenv("ADMIN_EMAILS", "tom@example.com")
+    monkeypatch.setenv("ADMIN_UIDS", "some-old-uid")
+    assert sandbox.is_admin("a-brand-new-uid", "tom@example.com")
+    assert sandbox.is_admin("a-brand-new-uid", "TOM@Example.com  ")
+    assert not sandbox.is_admin("a-brand-new-uid", "someone@example.com")
+    assert sandbox.is_admin("some-old-uid"), "the uid door still opens"
+
+
+def test_both_operator_addresses_ship_as_admins(monkeypatch):
+    monkeypatch.delenv("ADMIN_EMAILS", raising=False)
+    assert sandbox.is_admin(None, "tomharamaty@gmail.com")
+    assert sandbox.is_admin(None, "tom@withinapp.ai")
+    assert not sandbox.is_admin(None, "imanuelrozenberg@gmail.com")
+
+
+def test_a_uid_is_matched_case_sensitively(monkeypatch):
+    monkeypatch.setenv("ADMIN_UIDS", "MW2mQy81o7P7")
+    assert sandbox.is_admin("MW2mQy81o7P7")
+    assert not sandbox.is_admin("mw2mqy81o7p7"), "uids are opaque, not case-folded"
+
+
+def test_the_seating_reads_the_address_off_the_application(monkeypatch, tmp_path):
+    """The doc carries `email`; process() hands it to seat()."""
+    monkeypatch.setenv("ADMIN_EMAILS", "tom@example.com")
+    from jobs import ingest
+    monkeypatch.setattr(ingest, "TRADER", tmp_path)
+    conn = SeatConn()
+    ingest.seat(conn, _cleaned(), "a-brand-new-uid", "app-1", TODAY,
+                "tom@example.com")
+    tier = next(p[-2] for s, p in conn.sql if "insert into agents" in s)
+    assert tier == sandbox.TIER
+
+
+# ---------- a principal who holds more than one trader ----------
+
+def test_a_purge_spares_the_principals_other_trader(monkeypatch, tmp_path):
+    """Both admin accounts own a real trader on the floor as well as whatever
+    test trader is being purged. A sweep by uid would take the profile that
+    carries the real trader's letter address."""
+    conn = FakeConn(others=["fury"])
+    monkeypatch.setattr(purge.db, "connect", lambda: conn)
+    monkeypatch.setattr(purge, "TRADER", tmp_path)
+    seen = {}
+
+    def stub(fs, uid, tid, sole_trader=True):
+        seen["sole"] = sole_trader
+        return []
+
+    monkeypatch.setattr(purge, "fs_docs", stub)
+    purge.main(["--trader", "probe", "--yes"])
+    assert seen["sole"] is False
+
+
+def test_the_last_trader_takes_the_profile_with_it(monkeypatch, tmp_path):
+    conn = FakeConn(others=[])
+    monkeypatch.setattr(purge.db, "connect", lambda: conn)
+    monkeypatch.setattr(purge, "TRADER", tmp_path)
+    seen = {}
+
+    def stub(fs, uid, tid, sole_trader=True):
+        seen["sole"] = sole_trader
+        return []
+
+    monkeypatch.setattr(purge, "fs_docs", stub)
+    purge.main(["--trader", "probe", "--yes"])
+    assert seen["sole"] is True
+
+
+def test_the_sign_in_is_never_deleted_under_a_live_trader(monkeypatch, tmp_path, capsys):
+    conn = FakeConn(others=["fury"])
+    monkeypatch.setattr(purge.db, "connect", lambda: conn)
+    monkeypatch.setattr(purge, "TRADER", tmp_path)
+    monkeypatch.setattr(purge, "fs_docs", lambda *a, **k: [])
+    purge.main(["--trader", "probe", "--yes", "--auth"])
+    out = capsys.readouterr().out
+    assert "NOT deleted" in out and "fury" in out
+
+
+def test_the_report_names_the_other_traders(monkeypatch, capsys):
+    conn = FakeConn(others=["fury"])
+    monkeypatch.setattr(purge.db, "connect", lambda: conn)
+    monkeypatch.setattr(purge, "fs_docs", lambda *a, **k: [])
+    purge.main(["--trader", "probe"])
+    assert "also holds fury" in capsys.readouterr().out

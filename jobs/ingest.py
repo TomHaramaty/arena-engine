@@ -73,7 +73,7 @@ def listed_symbols(conn):
     ).fetchall()}
 
 
-def seat(conn, cleaned, uid, app_id, today):
+def seat(conn, cleaned, uid, app_id, today, email=None):
     """Seat a validated applicant. Idempotent — safe to re-run after a partial
     seating. Returns (trader_repo_paths_touched, tincture_pair_or_None).
 
@@ -82,7 +82,7 @@ def seat(conn, cleaned, uid, app_id, today):
     trader — that is the point of a test — and `python -m jobs.purge` destroys
     it completely. See design/account-deletion-2026-07-29.md."""
     aid = cleaned["id"]
-    sandboxed = sandbox.is_admin(uid)
+    sandboxed = sandbox.is_admin(uid, email)
     syms = cleaned["benchmark"]["symbols"]
     bench = {"symbols": syms,
              "weights": [round(1.0 / len(syms), 6)] * len(syms),
@@ -146,6 +146,10 @@ def process(conn, doc, today):
     from google.cloud import firestore
     data = doc.to_dict() or {}
     uid = str(data.get("uid") or "")
+    # The address the principal signed in with — the admin allowlist keys on
+    # it, because a test loop that deletes its Auth user mints a new uid every
+    # cycle and a uid allowlist would work exactly once.
+    email = str(data.get("email") or "")
     packet = data.get("packet")
     name = (str(packet.get("name") or "").strip().lower()
             if isinstance(packet, dict) else "")
@@ -160,7 +164,7 @@ def process(conn, doc, today):
                 packet, taken_ids=set(), has_live_agent=False,
                 listed_symbols=None, today=today)
             if cleaned and not reasons:
-                paths, _ = seat(conn, cleaned, uid, doc.id, today)
+                paths, _ = seat(conn, cleaned, uid, doc.id, today, email)
                 commit_trader(paths, name, today)
             doc.reference.update({"status": "seated", "agent_id": name,
                                   "seatedAt": firestore.SERVER_TIMESTAMP})
@@ -175,7 +179,7 @@ def process(conn, doc, today):
         packet,
         taken_ids=taken_ids(conn),
         has_live_agent=(bool(uid) and uid in live_uids(conn)
-                        and not sandbox.is_admin(uid)),
+                        and not sandbox.is_admin(uid, email)),
         listed_symbols=listed_symbols(conn),
         today=today)
     if not uid:
@@ -187,13 +191,14 @@ def process(conn, doc, today):
         print(f"  {doc.id}: REJECTED — " + " | ".join(reasons))
         return
 
-    paths, pair = seat(conn, cleaned, uid, doc.id, today)
+    paths, pair = seat(conn, cleaned, uid, doc.id, today, email)
     commit_trader(paths, cleaned["id"], today)
     doc.reference.update({"status": "seated", "agent_id": cleaned["id"],
                           "seatedAt": firestore.SERVER_TIMESTAMP})
     tinct = (f"tincture № {pair['n']} {pair['name']}" if pair
              else ("SANDBOX — no tincture, not on the floor, purgeable"
-                   if sandbox.is_admin(uid) else "tincture pending minting (slate)"))
+                   if sandbox.is_admin(uid, email)
+                   else "tincture pending minting (slate)"))
     print(f"  {doc.id}: SEATED — {cleaned['id']} · {tinct}")
 
 

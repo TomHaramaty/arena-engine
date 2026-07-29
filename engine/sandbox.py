@@ -14,22 +14,40 @@ import pathlib
 
 TIER = "test"
 
-# The principals allowed to seat sandbox traders. The operator's own uid — which
-# also owns ballast, a real trader on the floor, which is exactly why the purge
-# names a trader and never a uid. Env wins so CI and a laptop can differ without
-# a code change.
-DEFAULT_ADMIN_UIDS = ("MW2mQy81o7P7xrzl8T5SblnCxa52",)
+# The principals allowed to seat sandbox traders.
+#
+# By EMAIL first, and that is not a detail: the test loop deletes the Firebase
+# Auth user and signs in again, which mints a new uid every cycle. A uid
+# allowlist would work exactly once. The uids are kept as a second door for an
+# account whose application somehow carries no address.
+#
+# Both accounts here already own real traders on the floor — gmail owns ballast,
+# withinapp owns fury — which is exactly why the purge names a trader and never
+# a principal.
+DEFAULT_ADMIN_EMAILS = ("tomharamaty@gmail.com", "tom@withinapp.ai")
+DEFAULT_ADMIN_UIDS = ("MW2mQy81o7P7xrzl8T5SblnCxa52",
+                      "bKW6PZCBvuh2DBP3qsyZVaBnsxA3")
+
+
+def _from_env(name, default):
+    raw = os.environ.get(name)
+    values = raw.split(",") if raw else default
+    return {v.strip() for v in values if v.strip()}
 
 
 def admin_uids():
-    raw = os.environ.get("ADMIN_UIDS")
-    if raw:
-        return {u.strip() for u in raw.split(",") if u.strip()}
-    return set(DEFAULT_ADMIN_UIDS)
+    """Case-sensitive: a Firebase uid is a mixed-case opaque string."""
+    return _from_env("ADMIN_UIDS", DEFAULT_ADMIN_UIDS)
 
 
-def is_admin(uid):
-    return bool(uid) and uid in admin_uids()
+def admin_emails():
+    return {e.lower() for e in _from_env("ADMIN_EMAILS", DEFAULT_ADMIN_EMAILS)}
+
+
+def is_admin(uid, email=None):
+    if email and str(email).strip().lower() in admin_emails():
+        return True
+    return bool(uid) and str(uid) in admin_uids()
 
 
 def is_sandbox(agent_row):

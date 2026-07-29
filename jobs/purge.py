@@ -90,27 +90,54 @@ def purge_db(conn, trader_id):
 
 # ---------- Firestore ----------
 
-def fs_docs(fs, uid, trader_id):
-    """Every document belonging to this principal, as (label, DocumentReference).
+def fs_docs(fs, uid, trader_id, sole_trader=True):
+    """The documents this deletion may take, as (label, DocumentReference).
 
-    `applications` and `guidance` are queried by uid rather than read by id
-    because a principal accumulates them: every interview they ever submitted,
-    every note they ever filed.
+    Scoped to ONE trader, not to the principal. Both admin accounts own a real
+    trader on the floor as well as whatever test trader is being purged, so a
+    sweep by uid would delete the profile that carries the real trader's letter
+    address and the application that is its charter's provenance.
+
+    sole_trader=False (the principal still owns other traders) therefore keeps
+    `users/{uid}` and every application belonging to another trader.
     """
     from google.cloud.firestore_v1.base_query import FieldFilter
     out = []
-    for col in ("users", "drafts"):
-        ref = fs.collection(col).document(uid)
+    if sole_trader:
+        # The profile is the principal's, not the trader's — it only goes when
+        # the last trader does.
+        ref = fs.collection("users").document(uid)
         if ref.get().exists:
-            out.append((f"{col}/{uid}", ref))
+            out.append((f"users/{uid}", ref))
+    # The draft is whatever interview is in flight — for a test loop that is the
+    # leftover of the seating being purged.
+    ref = fs.collection("drafts").document(uid)
+    if ref.get().exists:
+        out.append((f"drafts/{uid}", ref))
     desk = fs.collection("desks").document(f"{uid}_{trader_id}")
     if desk.get().exists:
         out.append((f"desks/{uid}_{trader_id}", desk))
-    for col in ("applications", "guidance"):
-        for d in fs.collection(col).where(
-                filter=FieldFilter("uid", "==", uid)).stream():
-            out.append((f"{col}/{d.id}", d.reference))
+    for d in fs.collection("guidance").where(
+            filter=FieldFilter("uid", "==", uid)).stream():
+        if (d.to_dict() or {}).get("trader") == trader_id:
+            out.append((f"guidance/{d.id}", d.reference))
+    for d in fs.collection("applications").where(
+            filter=FieldFilter("uid", "==", uid)).stream():
+        seated_as = (d.to_dict() or {}).get("agent_id")
+        # An application with no agent_id was never seated — a rejection or an
+        # in-flight submission, the provenance of nothing.
+        if seated_as == trader_id or not seated_as:
+            out.append((f"applications/{d.id}", d.reference))
     return out
+
+
+def other_traders(conn, uid, trader_id):
+    """The principal's other traders. Their existence makes a purge narrower."""
+    if not uid:
+        return []
+    return [r["id"] for r in conn.execute(
+        "select id from agents where owner_uid=%s and id<>%s order by id",
+        (uid, trader_id)).fetchall()]
 
 
 def keep_for_retire(label):
@@ -150,17 +177,19 @@ def write_withdrawal(trader_id, today):
 def plan(conn, fs, row, retire):
     """Everything that would happen, gathered before anything happens."""
     trader_id, uid = row["id"], row["owner_uid"]
+    others = other_traders(conn, uid, trader_id)
     p = {
         "trader": trader_id,
         "tier": row["tier"],
         "uid": uid,
         "retire": retire,
+        "others": others,
         "db": {} if retire else db_counts(conn, trader_id),
         "docs": [],
         "paths": [],
     }
     if uid and fs is not None:
-        docs = fs_docs(fs, uid, trader_id)
+        docs = fs_docs(fs, uid, trader_id, sole_trader=not others)
         p["docs"] = [lbl for lbl, _ in docs
                      if not (retire and keep_for_retire(lbl))]
     d = prose_dir(trader_id)
@@ -175,6 +204,9 @@ def report(p):
     head = "RETIRE" if p["retire"] else "PURGE"
     print(f"\n{head}  {p['trader']}   tier={p['tier']}  owner={p['uid'] or '-'}")
     print("-" * 60)
+    if p["others"]:
+        print(f"  the principal also holds {', '.join(p['others'])} — their data "
+              "is out of scope")
     if p["retire"]:
         print("  postgres  agents.status → 'withdrawn' (no rows deleted)")
     else:
@@ -254,14 +286,19 @@ def main(argv=None):
 
     if fs is not None and row["owner_uid"]:
         n = 0
-        for lbl, ref in fs_docs(fs, row["owner_uid"], row["id"]):
+        for lbl, ref in fs_docs(fs, row["owner_uid"], row["id"],
+                                sole_trader=not p["others"]):
             if args.retire and keep_for_retire(lbl):
                 continue
             ref.delete()
             n += 1
         print(f"  firestore {n} document(s) deleted")
 
-    if args.auth and not args.retire and row["owner_uid"]:
+    if args.auth and p["others"]:
+        print(f"  auth      NOT deleted — the principal still holds "
+              f"{', '.join(p['others'])}. Deleting the sign-in would orphan "
+              "a live trader.")
+    elif args.auth and not args.retire and row["owner_uid"]:
         try:
             import firebase_admin
             from firebase_admin import auth as fb_auth

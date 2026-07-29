@@ -189,3 +189,122 @@ def test_unknown_trader_is_an_error_not_an_empty_letter():
 
 def test_avatar_url_is_the_hosted_raster():
     assert payload(ARENA, "catalyst", "Jul 28")["avatar_url"].endswith("/avatars/catalyst.png")
+
+
+# ------------------------------------------------------------------ rendering
+
+from jobs.letter import deliver, envelope, render_html, render_text, sparkline, subject  # noqa: E402
+
+PROSE = {
+    "preheader": "The beat came. The raise did not.",
+    "subject": "I sold Visa. The beat came; the raise did not.",
+    "line": "I sold Visa this afternoon, one day after buying it.",
+    "why": "My rule P2 says the edge dies with the event.",
+    "belief": "I believe drift persists in companies that raise guidance.",
+    "beliefTie": "Visa never qualified, which is why I sold.",
+}
+
+
+def _p():
+    return payload(ARENA, "catalyst", "Jul 28")
+
+
+def test_the_letter_prints_the_fill_price_from_the_record():
+    assert "366.040115" in render_html(_p(), PROSE)
+
+
+def test_the_letter_prints_the_computed_return_not_the_prose_claim():
+    html = render_html(_p(), PROSE)
+    assert "+1.15%" in html and "+1.3%" not in html
+
+
+def test_rendering_refuses_prose_that_states_a_quantity():
+    bad = dict(PROSE, line="I sold Visa at $366.04.")
+    with pytest.raises(ProseStatesQuantity):
+        render_html(_p(), bad)
+    with pytest.raises(ProseStatesQuantity):
+        render_text(_p(), bad)
+
+
+def test_the_subject_obeys_the_same_law():
+    with pytest.raises(ProseStatesQuantity):
+        subject(_p(), dict(PROSE, subject="Up 1.15% today"))
+
+
+def test_the_falsifier_reaches_the_letter():
+    assert "hit rate < 55% after 8 cases" in render_html(_p(), PROSE)
+
+
+def test_a_trader_with_no_open_test_omits_the_belief_block():
+    html = render_html(payload(ARENA, "vertex", "Jul 28"), PROSE)
+    assert "What would prove me wrong" not in html
+
+
+def test_the_face_is_a_hosted_raster_not_inline_svg():
+    html = render_html(_p(), PROSE)
+    assert "avatars/catalyst.png" in html and "<svg" not in html
+
+
+def test_the_sparkline_is_cells_not_an_image():
+    """Images are blocked by default in many clients; a vanishing chart is worse."""
+    s = sparkline([{"v": 100.0}, {"v": 101.0}, {"v": 99.0}])
+    assert "<td" in s and "<img" not in s
+
+
+def test_the_sparkline_declines_to_draw_a_single_point():
+    assert sparkline([{"v": 100.0}]) == ""
+
+
+def test_plain_text_carries_the_same_numbers():
+    t = render_text(_p(), PROSE)
+    assert "366.040115" in t and "+1.15%" in t
+
+
+def test_plain_text_carries_no_markup():
+    """A bare '<' is fine and expected — the falsifier reads 'hit rate < 55%'.
+    What must not survive is a tag."""
+    t = render_text(_p(), PROSE)
+    assert "hit rate < 55%" in t
+    for tag in ("<div", "<table", "<span", "<td", "style=", "&nbsp;"):
+        assert tag not in t
+
+
+def test_the_simulated_disclaimer_is_not_optional():
+    assert "simulated" in render_html(_p(), PROSE).lower()
+    assert "simulated" in render_text(_p(), PROSE).lower()
+
+
+def test_the_letter_stays_far_under_gmails_clip_threshold():
+    assert len(render_html(_p(), PROSE)) < 102_000
+
+
+# ------------------------------------------------------------------- delivery
+
+def test_the_envelope_comes_from_the_trader_and_replies_to_the_house():
+    m = envelope(_p(), PROSE, "someone@example.com")
+    assert m["from"].startswith("Catalyst · Conviction League <catalyst@conviction-league.com>")
+    assert m["to"] == ["someone@example.com"]
+    assert m["html"] and m["text"]
+
+
+def test_one_click_unsubscribe_is_present():
+    h = envelope(_p(), PROSE, "someone@example.com")["headers"]
+    assert "List-Unsubscribe" in h and h["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
+
+
+def test_delivery_without_a_key_refuses_rather_than_pretending():
+    with pytest.raises(RuntimeError, match="refusing to pretend"):
+        deliver({"to": ["x@y.z"]}, "")
+
+
+def test_delivery_posts_the_message_and_never_the_key_in_the_body():
+    seen = {}
+
+    def fake_post(url, headers, body):
+        seen.update(url=url, headers=headers, body=body)
+        return 200, {"id": "abc"}
+
+    status, out = deliver(envelope(_p(), PROSE, "x@y.z"), "re_test", post=fake_post)
+    assert status == 200 and out["id"] == "abc"
+    assert seen["headers"]["Authorization"] == "Bearer re_test"
+    assert "re_test" not in str(seen["body"])

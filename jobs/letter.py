@@ -188,3 +188,402 @@ def payload(arena: dict, agent_id: str, day: str) -> dict:
         # the face is a hosted raster: email strips inline SVG and blocks data:
         "avatar_url": f"https://conviction-league.com/avatars/{agent.get('id')}.png",
     }
+
+
+# ------------------------------------------------------------------ rendering
+
+SITE = "https://conviction-league.com"
+
+#: House palette, lifted from arena-web web/static/seat/seat.css. Email has no
+#: custom properties worth relying on, so the values are inlined.
+C = {
+    "mat": "#f1f0ec", "card": "#fcfcfb", "ink": "#0b0b0b", "ink2": "#52514e",
+    "muted": "#898781", "rule": "#e1e0d9", "tint": "#f5f3ec",
+    "brass": "#a06d12", "good": "#006300", "bad": "#d03b3b",
+}
+SERIF = "'Iowan Old Style',Palatino,Georgia,serif"
+MONO = "ui-monospace,'SF Mono',Menlo,Consolas,monospace"
+
+
+def money(n):
+    return "$" + f"{float(n or 0):,.2f}"
+
+
+def pct(n, dp=2):
+    n = float(n or 0)
+    return ("+" if n >= 0 else "−") + f"{abs(n) * 100:.{dp}f}%"
+
+
+def _sign(n):
+    return C["good"] if float(n or 0) >= 0 else C["bad"]
+
+
+def sparkline(curve, width=536, height=44, cols=44):
+    """An equity sparkline made of table cells rather than an image.
+
+    Many clients block images by default. A chart that vanishes is worse than
+    no chart, so this uses cells: it always renders, survives images-off, and
+    costs nothing in message size.
+    """
+    pts = [p for p in (curve or []) if isinstance(p, dict) and p.get("v") is not None]
+    if len(pts) < 2:
+        return ""
+    step = max(1, len(pts) // cols)
+    vals = [float(pts[i]["v"]) for i in range(0, len(pts), step)]
+    if vals[-1] != float(pts[-1]["v"]):
+        vals.append(float(pts[-1]["v"]))
+
+    lo, hi = min(vals + [100.0]), max(vals + [100.0])
+    span = (hi - lo) or 1.0
+    cw = max(4, width // len(vals))
+
+    cells = []
+    for i, v in enumerate(vals):
+        y = max(1, round((v - lo) / span * height))
+        last = i == len(vals) - 1
+        col = C["ink"] if last else (C["good"] if v >= 100 else C["bad"])
+        cells.append(
+            f'<td width="{cw}" style="vertical-align:bottom;padding:0 1px 0 0;font-size:0;line-height:0;">'
+            f'<div style="height:{height - y}px;font-size:0;line-height:0;">&nbsp;</div>'
+            f'<div style="height:{y}px;background:{col};opacity:{1 if last else 0.55};'
+            f'font-size:0;line-height:0;">&nbsp;</div></td>'
+        )
+    return (
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
+        f'style="table-layout:fixed;"><tr style="height:{height}px;">{"".join(cells)}</tr></table>'
+        f'<div style="border-top:1px dashed {C["rule"]};font-size:0;line-height:0;">&nbsp;</div>'
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
+        f'style="font:400 10px/1.6 {MONO};color:{C["muted"]};letter-spacing:.06em;text-transform:uppercase;">'
+        f'<tr><td>launch</td><td align="right">today · {pct((vals[-1] - 100) / 100)}</td></tr></table>'
+    )
+
+
+def _label(t):
+    return (f'<div style="font:600 10px/1 {MONO};color:{C["muted"]};letter-spacing:.12em;'
+            f'text-transform:uppercase;padding-bottom:12px;">{t}</div>')
+
+
+_RULE = f'<div style="height:1px;background:{C["rule"]};font-size:0;line-height:0;">&nbsp;</div>'
+
+
+def render_html(p, prose):
+    """Payload + prose -> the letter. Every number here comes from `p`."""
+    no_quantities(prose)
+    a, st = p["agent"], p["stand"]
+
+    rows = []
+    for f in p["fills"]:
+        rt = f.get("round_trip")
+        colour = C["bad"] if f.get("side") == "sell" else C["good"]
+        rows.append(
+            f'<tr><td style="padding:0 0 2px 0;"><span style="color:{colour};font-weight:600;">'
+            f'{str(f.get("side", "")).upper()}</span> &nbsp;{f.get("symbol")} &nbsp;{float(f.get("qty") or 0):.4f} sh</td>'
+            f'<td align="right" style="padding:0 0 2px 0;">${float(f.get("price") or 0):.6f}</td></tr>'
+        )
+        if rt:
+            rows.append(
+                f'<tr><td colspan="2" style="color:{C["ink2"]};padding:0 0 10px 0;font-size:12px;">'
+                f'bought at ${rt["entry"]:.6f} &nbsp;·&nbsp; '
+                f'<span style="color:{_sign(rt["ret"])};font-weight:600;">{pct(rt["ret"])}</span>'
+                f' &nbsp;·&nbsp; {money(rt["gain"])} &nbsp;·&nbsp; {money(rt["proceeds"])} back to cash</td></tr>'
+            )
+    for x in p["pulled"]:
+        rows.append(
+            f'<tr><td style="padding:0 0 2px 0;"><span style="color:{C["muted"]};font-weight:600;">PULLED</span>'
+            f' &nbsp;{x.get("symbol")} {x.get("mechanism", "")}</td>'
+            f'<td align="right" style="padding:0 0 2px 0;color:{C["ink2"]};">${float(x.get("trigger") or 0):.2f}</td></tr>'
+            f'<tr><td colspan="2" style="color:{C["ink2"]};font-size:12px;padding-bottom:10px;">'
+            f'no longer holding it, so nothing left to protect</td></tr>'
+        )
+    for x in p["blocked"]:
+        rows.append(
+            f'<tr><td style="padding:0 0 2px 0;"><span style="color:{C["bad"]};font-weight:600;">BLOCKED</span>'
+            f' &nbsp;{x.get("side")} {x.get("symbol")}</td>'
+            f'<td align="right" style="padding:0 0 2px 0;color:{C["ink2"]};">{money(x.get("notional"))}</td></tr>'
+            f'<tr><td colspan="2" style="color:{C["ink2"]};font-size:12px;padding-bottom:10px;">{x.get("note", "")}</td></tr>'
+        )
+
+    held = "".join(
+        f'<tr><td>{q.get("symbol")}</td>'
+        f'<td align="right" style="color:{C["ink2"]};">{money(q.get("value"))}</td>'
+        f'<td align="right" width="70" style="color:{_sign(q.get("pl"))};">{pct(q.get("pl"))}</td></tr>'
+        for q in p["positions"]
+    )
+
+    board = "".join(
+        f'<tr{f" style=\"background:{C["tint"]};\"" if b["id"] == a["id"] else ""}>'
+        f'<td style="padding-left:8px;">{b["name"]}{" — me" if b["id"] == a["id"] else ""}</td>'
+        f'<td align="right" style="color:{C["ink2"] if b["ret"] == 0 else _sign(b["ret"])};padding-right:8px;">'
+        f'{"0.00%" if b["ret"] == 0 else pct(b["ret"])}</td></tr>'
+        for b in p["board"]
+    )
+
+    h = p.get("hypothesis")
+    belief = ""
+    if h:
+        belief = (
+            f'<tr><td style="padding:24px 32px 0 32px;">'
+            f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
+            f'style="background:{C["tint"]};border-left:3px solid {C["brass"]};"><tr><td style="padding:16px 18px;">'
+            f'<div style="font:600 10px/1 {MONO};color:{C["brass"]};letter-spacing:.12em;text-transform:uppercase;'
+            f'padding-bottom:10px;">What would prove me wrong</div>'
+            f'<div style="font:400 15.5px/1.6 {SERIF};color:{C["ink"]};">{prose.get("belief", "")}</div>'
+            f'<div style="font:400 13px/1.65 {MONO};color:{C["ink2"]};padding-top:11px;">'
+            f'I abandon this belief if {h.get("falsifier")}. Decides by {h.get("expiry")}.</div>'
+            + (f'<div style="font:400 13.5px/1.6 {SERIF};color:{C["ink2"]};padding-top:11px;">{prose["beliefTie"]}</div>'
+               if prose.get("beliefTie") else "")
+            + '</td></tr></table></td></tr>'
+        )
+
+    return f"""<div style="margin:0;padding:0;background:{C['mat']};">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;">{prose.get('preheader', '')}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:{C['mat']};padding:28px 12px;">
+<tr><td align="center">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:100%;background:{C['card']};border:1px solid {C['rule']};">
+  <tr><td style="height:3px;background:{C['brass']};font-size:0;line-height:0;">&nbsp;</td></tr>
+  <tr><td style="padding:22px 32px 0 32px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td width="56" style="vertical-align:middle;padding-right:12px;">
+        <img src="{p['avatar_url']}" width="48" height="48" alt="{a['name']}" style="display:block;width:48px;height:48px;border:1px solid {C['rule']};background:{C['card']};"></td>
+      <td style="vertical-align:middle;">
+        <div style="font:700 19px/1.2 {SERIF};color:{C['ink']};">{a['name']}</div>
+        <div style="font:400 12px/1.5 {MONO};color:{C['muted']};padding-top:2px;">{a['archetype']} · a simulated book on Conviction League</div></td>
+      <td align="right" style="vertical-align:middle;font:400 11px/1.4 {MONO};color:{C['muted']};letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;">{p['day']}<br>close</td>
+    </tr></table></td></tr>
+  <tr><td style="padding:24px 32px 4px 32px;"><div style="font:400 20px/1.5 {SERIF};color:{C['ink']};">{prose.get('line', '')}</div></td></tr>
+  <tr><td style="padding:22px 32px 0 32px;">{_RULE}</td></tr>
+  <tr><td style="padding:18px 32px 0 32px;">{_label('What I did')}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font:400 13px/1.6 {MONO};color:{C['ink']};">{''.join(rows)}</table>
+    <div style="font:400 15px/1.65 {SERIF};color:{C['ink']};padding-top:6px;">{prose.get('why', '')}</div></td></tr>
+  <tr><td style="padding:22px 32px 0 32px;">{_RULE}</td></tr>
+  <tr><td style="padding:18px 32px 0 32px;">{_label('Where I stand')}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-family:{MONO};">
+      <tr><td width="50%" style="padding:0 0 12px 0;"><div style="font-size:10px;color:{C['muted']};letter-spacing:.08em;text-transform:uppercase;">Book</div><div style="font-size:19px;color:{C['ink']};padding-top:2px;">{money(st['equity'])}</div></td>
+          <td width="50%" style="padding:0 0 12px 0;"><div style="font-size:10px;color:{C['muted']};letter-spacing:.08em;text-transform:uppercase;">Since launch</div><div style="font-size:19px;color:{_sign(st['ret'])};padding-top:2px;">{pct(st['ret'])}</div></td></tr>
+      <tr><td><div style="font-size:10px;color:{C['muted']};letter-spacing:.08em;text-transform:uppercase;">Ahead of {st['benchmark']} by</div><div style="font-size:19px;color:{_sign(st['alpha'])};padding-top:2px;">{pct(st['alpha'])}</div></td>
+          <td><div style="font-size:10px;color:{C['muted']};letter-spacing:.08em;text-transform:uppercase;">Cash</div><div style="font-size:19px;color:{C['ink']};padding-top:2px;">{float(st['cash_pct'] or 0) * 100:.1f}%</div></td></tr>
+    </table>
+    <div style="padding-top:14px;">{sparkline(p['curve'])}</div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font:400 12.5px/1.9 {MONO};color:{C['ink']};padding-top:14px;">
+      <tr><td colspan="3" style="font-size:10px;color:{C['muted']};letter-spacing:.08em;text-transform:uppercase;line-height:1.6;padding-bottom:4px;">Still holding · each with a stop already placed</td></tr>
+      {held}</table></td></tr>
+  {belief}
+  <tr><td style="padding:24px 32px 0 32px;">{_label('On the floor')}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font:400 12.5px/2 {MONO};color:{C['ink']};">{board}
+      <tr><td colspan="2" style="border-top:1px solid {C['rule']};padding:6px 8px 0 8px;color:{C['ink2']};font-size:12px;">Floor average {pct(p['floor_avg'])} &nbsp;·&nbsp; {len(p['board'])} traders</td></tr></table></td></tr>
+  <tr><td style="padding:26px 32px 0 32px;">{_RULE}
+    <div style="font:400 16px/1.6 {SERIF};color:{C['ink']};padding-top:18px;">Tell me something before tomorrow's bell and I will answer it at my next session — adopt it, turn it into a test, or tell you plainly why I won't.</div>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="padding-top:16px;"><tr><td style="background:{C['ink']};"><a href="{SITE}/desk" style="display:inline-block;padding:13px 22px;font:600 13px/1 {MONO};color:{C['card']};text-decoration:none;letter-spacing:.04em;">Write to me at my desk →</a></td></tr></table>
+    <div style="font:400 12.5px/1.6 {MONO};color:{C['muted']};padding-top:12px;">Or read the whole record — every trade, every reason — <a href="{SITE}/floor" style="color:{C['brass']};text-decoration:underline;">on the floor</a>.</div></td></tr>
+  <tr><td style="padding:26px 32px 28px 32px;">
+    <div style="height:1px;background:{C['rule']};font-size:0;line-height:0;margin-bottom:14px;">&nbsp;</div>
+    <div style="font:400 11.5px/1.7 {MONO};color:{C['muted']};"><strong style="color:{C['ink2']};font-weight:600;">Every fill here is simulated.</strong> No real money is traded and nothing in this letter is investment advice. Prices are real; the book is not.<br><br>
+      {a['name']} is chartered by {a['chartered_by']} on Conviction League.
+      <a href="{SITE}/desk" style="color:{C['muted']};">Change how often I write</a> ·
+      <a href="{SITE}/desk" style="color:{C['muted']};">Stop these letters</a></div></td></tr>
+</table>
+<div style="font:400 11px/1.6 {MONO};color:#a9a7a0;padding-top:14px;">conviction-league.com</div>
+</td></tr></table></div>"""
+
+
+def render_text(p, prose):
+    """The plain-text alternative. Not optional: deliverability and screen
+    readers both want it."""
+    no_quantities(prose)
+    a, st = p["agent"], p["stand"]
+    strip = lambda s: _TAG.sub("", str(s or ""))  # noqa: E731
+
+    lines = [f"{a['name'].upper()} — {p['day']}, close",
+             f"{a['archetype']} · a simulated book on Conviction League", "",
+             strip(prose.get("line")), "", "WHAT I DID"]
+    for f in p["fills"]:
+        lines.append(f"  {str(f.get('side','')).upper()}  {f.get('symbol')}  "
+                     f"{float(f.get('qty') or 0):.4f} sh @ ${float(f.get('price') or 0):.6f}")
+        if f.get("round_trip"):
+            rt = f["round_trip"]
+            lines.append(f"        bought at ${rt['entry']:.6f} · {pct(rt['ret'])} · "
+                         f"{money(rt['gain'])} · {money(rt['proceeds'])} back to cash")
+    for x in p["pulled"]:
+        lines.append(f"  PULLED  {x.get('symbol')} {x.get('mechanism','')} @ ${float(x.get('trigger') or 0):.2f}")
+    for x in p["blocked"]:
+        lines.append(f"  BLOCKED {x.get('side')} {x.get('symbol')} {money(x.get('notional'))} — {x.get('note','')}")
+
+    lines += ["", strip(prose.get("why")), "", "WHERE I STAND",
+              f"  Book            {money(st['equity'])}",
+              f"  Since launch    {pct(st['ret'])}",
+              f"  Ahead of {st['benchmark']} by  {pct(st['alpha'])}",
+              f"  Cash            {float(st['cash_pct'] or 0) * 100:.1f}%", "",
+              "  Still holding · each with a stop already placed"]
+    lines += [f"  {q.get('symbol'):<6} {money(q.get('value')):>12}  {pct(q.get('pl'))}" for q in p["positions"]]
+
+    h = p.get("hypothesis")
+    if h:
+        lines += ["", "WHAT WOULD PROVE ME WRONG", "  " + strip(prose.get("belief")),
+                  f"  I abandon this belief if {h.get('falsifier')}. Decides by {h.get('expiry')}."]
+        if prose.get("beliefTie"):
+            lines.append("  " + strip(prose["beliefTie"]))
+
+    lines += ["", "ON THE FLOOR"]
+    lines += [f"  {(b['name'] + (' — me' if b['id'] == a['id'] else '')):<16} "
+              f"{'0.00%' if b['ret'] == 0 else pct(b['ret'])}" for b in p["board"]]
+    lines += [f"  Floor average {pct(p['floor_avg'])} · {len(p['board'])} traders", "",
+              "Tell me something before tomorrow's bell and I will answer it at my next",
+              "session — adopt it, turn it into a test, or tell you plainly why I won't.", "",
+              f"  Write to me at my desk:  {SITE}/desk",
+              f"  Read the whole record:   {SITE}/floor", "", "---",
+              "Every fill here is simulated. No real money is traded and nothing in this",
+              "letter is investment advice. Prices are real; the book is not.",
+              f"Change how often I write, or stop these letters: {SITE}/desk"]
+    return "\n".join(lines) + "\n"
+
+
+def subject(p, prose):
+    """The subject line is prose, so it obeys the same law."""
+    no_quantities({"subject": prose.get("subject", "")})
+    return prose.get("subject") or f"{p['agent']['name']} — {p['day']}"
+
+
+# ------------------------------------------------------------------- delivery
+
+RESEND_URL = "https://api.resend.com/emails"
+
+
+def recipient(fs, uid):
+    """The principal's address, from Firestore `users/{uid}`.
+
+    Their own pages write it there at sign-in. It is never published in
+    arena.json and never inferred: no address, no letter.
+    """
+    if not uid:
+        return ""
+    snap = fs.collection("users").document(uid).get()
+    data = (snap.to_dict() or {}) if snap is not None and snap.exists else {}
+    email = str(data.get("email") or "").strip()
+    return email if "@" in email and len(email) <= 254 else ""
+
+
+def envelope(p, prose, to):
+    """The message as Resend wants it. Separated from the sending so the whole
+    shape is assertable without a network."""
+    a = p["agent"]
+    return {
+        "from": f"{a['name']} · Conviction League <{a['id']}@conviction-league.com>",
+        "to": [to],
+        "reply_to": "hello@conviction-league.com",
+        "subject": subject(p, prose),
+        "html": render_html(p, prose),
+        "text": render_text(p, prose),
+        # one-click unsubscribe is effectively required for bulk mail; it must
+        # work without a login, so it points at the desk's own preference page
+        "headers": {
+            "List-Unsubscribe": f"<{SITE}/desk?letters=off>",
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        },
+    }
+
+
+def deliver(msg, api_key, post=None):
+    """POST to Resend. `post` is injectable so tests never touch the network."""
+    if not api_key:
+        raise RuntimeError("RESEND_API_KEY is not set; refusing to pretend a letter was sent")
+    if post is None:  # pragma: no cover - exercised only against the real API
+        import json as _json
+        import urllib.request
+
+        def post(url, headers, body):
+            req = urllib.request.Request(url, data=_json.dumps(body).encode(),
+                                         headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.status, _json.loads(r.read().decode())
+
+    return post(RESEND_URL,
+                {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                msg)
+
+
+def main():  # pragma: no cover - orchestration, exercised end to end
+    """Decide and send for every seated trader whose principal wants letters.
+
+    Facts come from the published arena.json; preferences and the address come
+    from Postgres and Firestore. A failure for one trader never stops another,
+    and a trader that stays quiet says why.
+    """
+    import argparse
+    import json
+    import os
+    import urllib.request
+
+    from engine import db
+    from engine import observability as obs
+    from jobs.ingest import fs_client
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--day", required=True, help='tape day label, e.g. "Jul 28"')
+    ap.add_argument("--reflection", action="store_true", help="a reflection ran today")
+    ap.add_argument("--dry", action="store_true", help="decide and render, send nothing")
+    args = ap.parse_args()
+
+    with urllib.request.urlopen(f"{SITE}/arena.json", timeout=30) as r:
+        arena = json.loads(r.read().decode())
+
+    fs = fs_client()
+    key = os.environ.get("RESEND_API_KEY", "")
+    sent = quiet = failed = 0
+
+    with db.connect() as conn:
+        rows = conn.execute(
+            "select id, config, owner_uid from agents "
+            "where status='active' and owner_uid is not null order by id"
+        ).fetchall()
+
+    for row in rows:
+        aid = row["id"]
+        cfg = row["config"] if isinstance(row["config"], dict) else json.loads(row["config"] or "{}")
+        updates = (cfg.get("updates") or {})
+        cadence = updates.get("cadence", "daily")
+        try:
+            p = payload(arena, aid, args.day)
+            send, why = eligible(cadence, day_events(arena.get("tape") or [], aid, args.day),
+                                 is_reflection_day=args.reflection)
+            if not send:
+                quiet += 1
+                print(f"  {aid}: quiet — {why}")
+                continue
+            to = recipient(fs, row["owner_uid"])
+            if not to:
+                quiet += 1
+                print(f"  {aid}: no address on file — not sending")
+                continue
+            prose = voice_pass(p)  # the model writes connective prose only
+            msg = envelope(p, prose, to)
+            if args.dry:
+                print(f"  {aid}: WOULD SEND to {to} — {why} — {len(msg['html'])} bytes")
+                continue
+            status, body = deliver(msg, key)
+            sent += 1
+            print(f"  {aid}: sent to {to} — {why} — {status} {body.get('id', '')}")
+        except ProseStatesQuantity as e:
+            failed += 1
+            print(f"  {aid}: REFUSED — {e}")
+        except Exception as e:  # one trader's failure never silences the rest
+            failed += 1
+            print(f"  {aid}: failed — {e}")
+
+    print(f"letters: {sent} sent, {quiet} quiet, {failed} failed")
+    obs.heartbeat("letters", ok=failed == 0) if hasattr(obs, "heartbeat") else None
+
+
+def voice_pass(p):  # pragma: no cover - model call, wired in the next step
+    """The one model call: connective prose, never a quantity.
+
+    Not yet wired to a brain. Until it is, a letter cannot be composed, and
+    that is deliberate — the alternative is a template pretending to be a
+    trader's voice.
+    """
+    raise NotImplementedError(
+        "voice_pass: the model writes prose with no digits; wire to the brain runner"
+    )
+
+
+if __name__ == "__main__":  # pragma: no cover
+    main()

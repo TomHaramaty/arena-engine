@@ -177,6 +177,26 @@ def test_principles_parse_with_site_parser(tmp_path):
     assert "Revenue and guidance" in p2["detail"]
 
 
+def test_adopted_origin_sanitized_and_rendered(tmp_path):
+    # provenance: "adopted" survives, anything else normalizes to "lived",
+    # and the record's origin line says plainly which is which
+    packet = copy.deepcopy(PACKET)
+    packet["principles"][0]["origin"] = "ADOPTED"       # case-normalized
+    packet["principles"][1]["origin"] = "invented"      # unknown -> lived
+    cleaned, reasons = validate(packet)
+    assert reasons == []
+    assert cleaned["principles"][0]["origin"] == "adopted"
+    assert cleaned["principles"][1]["origin"] == "lived"
+    seating.write_seed_files(tmp_path, cleaned, TODAY, "app-doc-1")
+    d = tmp_path / "agents" / "calla"
+    parsed = parse_principles(d / "principles.md")
+    assert "adopted at seat interview" in parsed[0]["origin"]
+    assert parsed[0]["changelog"][0]["text"].startswith("Adopted at seat interview")
+    assert "adopted" not in parsed[1]["origin"]
+    assert parsed[1]["changelog"] == [{"date": "2026-07-23",
+                                       "text": "Seeded from seat interview."}]
+
+
 def test_hypotheses_parse_with_site_parser(tmp_path):
     _, d, _ = seeded(tmp_path)
     parsed = parse_hypotheses(d / "hypotheses.md")

@@ -228,12 +228,17 @@ def validate_packet(packet, taken_ids, has_live_agent, listed_symbols, today=Non
             continue
         ptype = str(p.get("type") or "").strip().lower()
         rigidity = str(p.get("rigidity") or "").strip().lower()
+        # provenance: "adopted" marks a stance the Registrar proposed and the
+        # principal took, vs the default "lived" (extracted behavior). The
+        # record must never imply extraction that didn't happen.
+        origin = str(p.get("origin") or "").strip().lower()
         principles.append({
             "statement": stmt,
             "detail": _line(p.get("detail"), 600),
             "type": ptype if ptype in P_TYPES else "process",
             "rigidity": rigidity if rigidity in ("hard", "heuristic") else "heuristic",
             "quote": _line(p.get("quote"), 200),
+            "origin": "adopted" if origin == "adopted" else "lived",
         })
     if len(principles) < 2:
         reasons.append("Fewer than two usable principles. An agent without "
@@ -360,8 +365,13 @@ def harness_md(c, today):
 def principles_md(c, today):
     out = [f"# {c['name']} — principles"]
     for i, p in enumerate(c["principles"], 1):
-        origin = (f'seat interview ({today} — "{p["quote"]}")' if p["quote"]
-                  else f"seat interview ({today})")
+        prov = ("adopted at seat interview" if p.get("origin") == "adopted"
+                else "seat interview")
+        origin = (f'{prov} ({today} — "{p["quote"]}")' if p["quote"]
+                  else f"{prov} ({today})")
+        seeded = ("Adopted at seat interview: proposed by the Registrar, "
+                  "taken by the principal." if p.get("origin") == "adopted"
+                  else "Seeded from seat interview.")
         out += ["", f"## P{i} · {p['statement']}"]
         if p["detail"]:
             out.append(p["detail"])
@@ -370,7 +380,7 @@ def principles_md(c, today):
             f"- origin: {origin} · status: active",
             "- evidence: 0 for · 0 against",
             "- changelog:",
-            f"  - {today}: Seeded from seat interview.",
+            f"  - {today}: {seeded}",
         ]
     return "\n".join(out) + "\n"
 

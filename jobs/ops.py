@@ -6,7 +6,7 @@ visitor, and a running bill on a public page anchors a price on a product that
 has not set one. So they left arena.json (2026-07-28, design/trades) and live
 here instead, read straight from Postgres.
 
-This is genuinely operator-only, which an unlisted page on open-outcry.web.app
+This is genuinely operator-only, which an unlisted page on conviction-league.com
 would not have been: anything the site publishes is served to anyone who asks
 for the URL, linked or not.
 
@@ -48,7 +48,7 @@ def report(conn, n_runs=25, n_ops=40, n_trig=20):
         "select count(*) n from guidance where disposition is null"
     ).fetchone()["n"]
 
-    print("OPEN OUTCRY — operator console")
+    print("CONVICTION LEAGUE — operator console")
     print(f"  prices          {_t(last)} · {symbols} symbols tracked")
     print(f"  active traders  {active}")
     print(f"  brain runs      {spend['n']}")

@@ -79,13 +79,23 @@ def _quote(src, key, attempts=3):
 
 def _normalize(q):
     """A raw /quote payload → the engine's tick shape, or None if it has no
-    usable price (0 or absent = unknown symbol / no data on this plan)."""
+    usable price (0 or absent = unknown symbol / no data on this plan).
+
+    high/low/open are the session extremes the payload carries alongside the
+    last price. Verified 2026-07-29, live during pre-market: the free tier
+    freezes c/h/l/o/t at the previous close until the next regular session
+    opens, so h/l describe the regular session only — no extended-hours
+    prints — and t names the session they belong to. The fill logic leans on
+    both facts; re-verify if the plan changes."""
     if not q or not q.get("c"):
         return None
     ts = q.get("t") or 0
     return {
         "price": float(q["c"]),
         "prev_close": float(q["pc"]) if q.get("pc") else None,
+        "high": float(q["h"]) if q.get("h") else None,
+        "low": float(q["l"]) if q.get("l") else None,
+        "open": float(q["o"]) if q.get("o") else None,
         "ts": datetime.fromtimestamp(ts, tz=timezone.utc)
         if ts
         else datetime.now(timezone.utc),
@@ -174,6 +184,10 @@ def fetch_quotes(symbol_map):
             time.sleep(60)  # stay under the per-minute cap on big universes
         tick = _normalize(_quote(src, key))
         if tick:
+            # Exchange-prefixed symbols (crypto) report a rolling 24h window,
+            # not a session — their h/l can predate anything and must never
+            # drive the touched-since-last-look fill logic.
+            tick["session_range"] = ":" not in src
             out[sym] = tick
         time.sleep(0.15)
     return out

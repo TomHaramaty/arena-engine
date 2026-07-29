@@ -50,6 +50,13 @@ create table if not exists ticks (
 );
 create index if not exists ticks_symbol_ts on ticks(symbol, ts desc);
 
+-- range-aware fills (2026-07-29): the session extremes the data source
+-- reported at each sample, recorded so every touched-since-last-look fire is
+-- auditable against exactly the data it used.
+alter table ticks add column if not exists high numeric;
+alter table ticks add column if not exists low numeric;
+alter table ticks add column if not exists day_open numeric;
+
 create table if not exists positions (
   agent_id text references agents(id),
   symbol text,

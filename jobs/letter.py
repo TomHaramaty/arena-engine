@@ -126,7 +126,7 @@ def eligible(cadence: str, events: list, *, is_reflection_day: bool = False,
         # ...except that going quiet indefinitely reads as breakage. On a
         # Friday, after enough silence, say so.
         if silent_fridays >= SILENT_FRIDAYS_BEFORE_SPEAKING:
-            return True, f"still waiting — {silent_fridays} quiet weeks, and silence is not a status"
+            return True, f"still waiting: {silent_fridays} quiet weeks, and silence is not a status"
         return False, "nothing happened on the record today"
     if answered_guidance:
         return True, "the trader answered its principal"
@@ -340,7 +340,7 @@ def render_html(p, prose):
 
     board = "".join(
         f'<tr{f" style=\"background:{C["tint"]};\"" if b["id"] == a["id"] else ""}>'
-        f'<td style="padding-left:8px;">{b["name"]}{" — me" if b["id"] == a["id"] else ""}</td>'
+        f'<td style="padding-left:8px;">{b["name"]}{" (me)" if b["id"] == a["id"] else ""}</td>'
         f'<td align="right" style="color:{C["ink2"] if b["ret"] == 0 else _sign(b["ret"])};padding-right:8px;">'
         f'{"0.00%" if b["ret"] == 0 else pct(b["ret"])}</td></tr>'
         for b in p["board"]
@@ -400,9 +400,9 @@ def render_html(p, prose):
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font:400 12.5px/2 {MONO};color:{C['ink']};">{board}
       <tr><td colspan="2" style="border-top:1px solid {C['rule']};padding:6px 8px 0 8px;color:{C['ink2']};font-size:12px;">Floor average {pct(p['floor_avg'])} &nbsp;·&nbsp; {len(p['board'])} traders</td></tr></table></td></tr>
   <tr><td style="padding:26px 32px 0 32px;">{_RULE}
-    <div style="font:400 16px/1.6 {SERIF};color:{C['ink']};padding-top:18px;">Tell me something before tomorrow's bell and I will answer it at my next session — adopt it, turn it into a test, or tell you plainly why I won't.</div>
+    <div style="font:400 16px/1.6 {SERIF};color:{C['ink']};padding-top:18px;">Tell me something before tomorrow's bell and I will answer it at my next session: adopt it, turn it into a test, or tell you plainly why I won't.</div>
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="padding-top:16px;"><tr><td style="background:{C['ink']};"><a href="{SITE}/desk" style="display:inline-block;padding:13px 22px;font:600 13px/1 {MONO};color:{C['card']};text-decoration:none;letter-spacing:.04em;">Write to me at my desk →</a></td></tr></table>
-    <div style="font:400 12.5px/1.6 {MONO};color:{C['muted']};padding-top:12px;">Or read the whole record — every trade, every reason — <a href="{SITE}/floor" style="color:{C['brass']};text-decoration:underline;">on the floor</a>.</div></td></tr>
+    <div style="font:400 12.5px/1.6 {MONO};color:{C['muted']};padding-top:12px;">Or read the whole record, every trade and every reason, <a href="{SITE}/floor" style="color:{C['brass']};text-decoration:underline;">on the floor</a>.</div></td></tr>
   <tr><td style="padding:26px 32px 28px 32px;">
     <div style="height:1px;background:{C['rule']};font-size:0;line-height:0;margin-bottom:14px;">&nbsp;</div>
     <div style="font:400 11.5px/1.7 {MONO};color:{C['muted']};"><strong style="color:{C['ink2']};font-weight:600;">Every fill here is simulated.</strong> No real money is traded and nothing in this letter is investment advice. Prices are real; the book is not.<br><br>
@@ -421,7 +421,7 @@ def render_text(p, prose):
     a, st = p["agent"], p["stand"]
     strip = lambda s: _TAG.sub("", str(s or ""))  # noqa: E731
 
-    lines = [f"{a['name'].upper()} — {p['day']}, close",
+    lines = [f"{a['name'].upper()} · {p['day']}, close",
              f"{a['archetype']} · a simulated book on Conviction League", "",
              strip(prose.get("line")), "", "WHAT I DID"]
     for f in p["fills"]:
@@ -434,7 +434,7 @@ def render_text(p, prose):
     for x in p["pulled"]:
         lines.append(f"  PULLED  {x.get('symbol')} {x.get('mechanism','')} @ ${float(x.get('trigger') or 0):.2f}")
     for x in p["blocked"]:
-        lines.append(f"  BLOCKED {x.get('side')} {x.get('symbol')} {money(x.get('notional'))} — {x.get('note','')}")
+        lines.append(f"  BLOCKED {x.get('side')} {x.get('symbol')} {money(x.get('notional'))}: {x.get('note','')}")
 
     lines += ["", strip(prose.get("why")), "", "WHERE I STAND",
               f"  Book            {money(st['equity'])}",
@@ -452,11 +452,11 @@ def render_text(p, prose):
             lines.append("  " + strip(prose["beliefTie"]))
 
     lines += ["", "ON THE FLOOR"]
-    lines += [f"  {(b['name'] + (' — me' if b['id'] == a['id'] else '')):<16} "
+    lines += [f"  {(b['name'] + (' (me)' if b['id'] == a['id'] else '')):<16} "
               f"{'0.00%' if b['ret'] == 0 else pct(b['ret'])}" for b in p["board"]]
     lines += [f"  Floor average {pct(p['floor_avg'])} · {len(p['board'])} traders", "",
               "Tell me something before tomorrow's bell and I will answer it at my next",
-              "session — adopt it, turn it into a test, or tell you plainly why I won't.", "",
+              "session: adopt it, turn it into a test, or tell you plainly why I won't.", "",
               f"  Write to me at my desk:  {SITE}/desk",
               f"  Read the whole record:   {SITE}/floor", "", "---",
               "Every fill here is simulated. No real money is traded and nothing in this",
@@ -468,7 +468,7 @@ def render_text(p, prose):
 def subject(p, prose):
     """The subject line is prose, so it obeys the same law."""
     no_quantities({"subject": prose.get("subject", "")})
-    return prose.get("subject") or f"{p['agent']['name']} — {p['day']}"
+    return prose.get("subject") or f"{p['agent']['name']}, {p['day']}"
 
 
 # ------------------------------------------------------------------- delivery
@@ -644,7 +644,7 @@ def main():  # pragma: no cover - orchestration, exercised end to end
 
 
 VOICE_PROMPT = """You are {name}, an autonomous trader on Conviction League. \
-You are writing the short prose of today's letter to your principal — the \
+You are writing the short prose of today's letter to your principal, the \
 person whose answers became your charter.
 
 Your voice, authored by them at your interview: {voice}
@@ -655,14 +655,17 @@ Your credo: {credo}
 
 ## The one hard rule
 You must NOT write any number, price, percentage, quantity or date. Not one \
-digit. Every figure is printed by the letter itself, beside your words — if \
+digit. Every figure is printed by the letter itself, beside your words. If \
 you write one it will be wrong, and the letter will be refused and never sent.
 Refer to amounts in words instead: "a little over one per cent", "most of the \
 book", "a modest gain". You MAY cite your own rules and tests by their \
-identifier — P2, H1 — because those name the record rather than describe it.
+identifier (P2, H1), because those name the record rather than describe it.
 
 Write in the FIRST PERSON. Report; never advise, never predict, never \
 recommend. Be specific and unhurried. No exclamation marks, no emoji.
+Never write an em dash (—). Break the sentence in two, or use a comma, a \
+colon or a semicolon. Long dashes are what make writing read as machine-made, \
+and this letter has to read as yours.
 
 Respond with ONLY a json object:
 {{"subject": "a subject line, under nine words, no numbers",
@@ -694,13 +697,15 @@ def deprice(text: str, limit: int = 420) -> str:
     """
     # the placeholder must contain NO digit of its own, or the stripper below
     # eats the very thing it is protecting (observed: "Per Principle P2"
-    # became "Per Principle —")
+    # became "Per Principle …"). It is an ellipsis rather than an em dash
+    # because whatever the model reads here it eventually writes: a redacted
+    # note full of long dashes taught it exactly the habit the letter bans.
     kept = {m.group(0): "\x00" + "Z" * (i + 1) + "\x00"
             for i, m in enumerate(RECORD_ID.finditer(text or ""))}
     s = text or ""
     for original, token in kept.items():
         s = s.replace(original, token)
-    s = _NUMBERISH.sub("—", s)
+    s = _NUMBERISH.sub("…", s)
     for original, token in kept.items():
         s = s.replace(token, original)
     return re.sub(r"\s+", " ", s).strip()[:limit]

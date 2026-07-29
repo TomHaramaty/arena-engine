@@ -75,7 +75,7 @@ CLASS_CLAUSES = {
         "Crypto: not permitted.",
     ),
     "inverse_levered": (
-        "Inverse and leveraged ETFs: max {pct:g}% of equity — these are the "
+        "Inverse and leveraged ETFs: max {pct:g}% of equity. These are the "
         "only way to hold a bearish or levered view here, and they decay in "
         "chop; they are not buy-and-hold instruments.",
         "Inverse and leveraged ETFs: not permitted. A bearish view is "
@@ -311,7 +311,7 @@ def harness_md(c, today):
     class_pct = c.get("class_pct") or {}
     constitution = (
         FLOOR_HEAD
-        + [f"Universe: {c['universe']} — anything the arena can price: "
+        + [f"Universe: {c['universe'].rstrip('.')}. Anything the arena can price: "
            "US-listed equities, ADRs and ETFs, and major crypto pairs. Names "
            "not yet quoted are requested by the agent and granted if they "
            "resolve."]
@@ -328,7 +328,7 @@ def harness_md(c, today):
         _sentence(f"Voice: {c['voice']}"),
     ]))
     mandate = (
-        "Prove the credo on the public record — decisively. Research-backed "
+        "Prove the credo on the public record, decisively. Research-backed "
         "action within the constitution; inaction requires as much "
         "justification as action. If the record falsifies the credo, retire "
         "it in the open and let the reflections rewrite the rulebook."
@@ -350,7 +350,7 @@ def harness_md(c, today):
         f"# {c['name']} — harness\n\n"
         f"## Identity\n{identity}\n\n"
         f"## Mandate\n{mandate}\n\n"
-        "## Constitution (hard limits — cannot be changed by reflection)\n"
+        "## Constitution (hard limits, cannot be changed by reflection)\n"
         + "".join(f"- {line}\n" for line in constitution)
         + "\n## Parameters\n"
         + "".join(f"- {line}\n" for line in params)

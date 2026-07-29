@@ -35,10 +35,11 @@ SCHEMA = """{
 RULES = """Reflection rules (binding):
 - Judge DECISION QUALITY strictly against what was knowable at decision time; outcomes judge themselves. A good decision can lose money; a lucky bad one must still be called bad.
 - Respect sample sizes: do not strengthen/weaken a principle on 1-2 observations unless the evidence is qualitative and structural. Prefer recording evidence over changing rules.
-- NEW principles may ONLY come from promoting a hypothesis that met its prediction (promotions[]), or — rarely — a catastrophic lesson via fast_track_principles[] with explicit justification.
+- NEW principles may ONLY come from promoting a hypothesis that met its prediction (promotions[]), or, rarely, a catastrophic lesson via fast_track_principles[] with explicit justification.
 - Falsify hypotheses that hit their falsifier; expire lapsed ones; otherwise update evidence.
 - The counterargument is mandatory and must genuinely attack your most significant proposed change.
-- Change nothing if nothing earned changing — an empty change-set with honest verdicts is a valid reflection."""
+- Change nothing if nothing earned changing; an empty change-set with honest verdicts is a valid reflection.
+- Write plainly. Never use an em dash (—) in anything you write: break the sentence in two, or use a comma, a colon or a semicolon. Everything here is published under your name."""
 
 
 def realized_trades(conn, agent_id, since):
@@ -78,7 +79,7 @@ DORMANCY_CHARGE = """## WHY YOU ARE HERE: {n} sessions in a row, no order placed
 
 The engine filed this against you. You have deliberated {n} times since you last
 acted, and {verdict}. That is a position, and this reflection judges it exactly
-as it would judge a losing trade — against what was knowable at the time, not
+as it would judge a losing trade: against what was knowable at the time, not
 against the outcome.
 
 Answer these directly and in this order, in your findings:
@@ -86,7 +87,7 @@ Answer these directly and in this order, in your findings:
    check whether it has EVER occurred in the period you claim to trade?
 2. Is that condition reachable with the data this arena actually has? If a
    hypothesis of yours depends on data you cannot get, it is not a hypothesis,
-   it is a wish — falsify it or replace it now rather than carrying it to
+   it is a wish. Falsify it or replace it now rather than carrying it to
    expiry.
 3. If your entry conditions are so rare that they have not fired once, the
    rulebook is what is wrong, not the market. Amend the principle that gates
@@ -119,7 +120,7 @@ def why_now(conn, agent_id, since):
         held = conn.execute(
             "select count(*) c from positions where agent_id=%s", (agent_id,)
         ).fetchone()["c"]
-        verdict = ("every time concluded in cash — you have never taken a "
+        verdict = ("every time concluded in cash; you have never taken a "
                    "position at all" if not held else
                    f"every time left your {held} open position(s) exactly as "
                    "they were: no add, no trim, no exit, no new name")
@@ -153,12 +154,12 @@ def build_reflection_prompt(conn, agent_id):
            where r.agent_id=%s and o.created_at>%s order by o.created_at""",
         (agent_id, since),
     ).fetchall()
-    rejected = [f"- {o['type']}: {o['reason']} — {json.dumps(o['payload'])[:120]}"
+    rejected = [f"- {o['type']}: {o['reason']} · {json.dumps(o['payload'])[:120]}"
                 for o in ops_hist if o["verdict"] == "rejected"]
     return (
         f"{context.read(d / 'harness.md')}\n\n{context.read(d / 'principles.md')}\n\n"
         f"{context.read(d / 'hypotheses.md')}\n\n"
-        f"# REFLECTION — {datetime.now(timezone.utc):%Y-%m-%d}\n\n"
+        f"# REFLECTION: {datetime.now(timezone.utc):%Y-%m-%d}\n\n"
         f"This is your scheduled deep self-examination (period since {since}).\n\n"
         f"{why_now(conn, agent_id, since)}"
         f"{RULES}\n\n"
@@ -247,7 +248,7 @@ def apply_reflection(conn, agent_id, run_id, R):
             if action == "amend" and c.get("new_statement"):
                 old = P.statement(pid)
                 P.amend_statement(pid, c["new_statement"])
-                P.append_log(pid, date, f"Amended (was: “{old}”) — {c.get('note', '')}")
+                P.append_log(pid, date, f"Amended (was: “{old}”) · {c.get('note', '')}")
             elif action in ("strengthen", "weaken", "retire"):
                 P.set_status(pid, {"strengthen": "strengthened", "weaken": "weakened", "retire": "retired"}[action])
                 P.append_log(pid, date, c.get("note", action))

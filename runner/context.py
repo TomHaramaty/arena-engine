@@ -8,7 +8,7 @@ TRADER_REPO = pathlib.Path(os.environ.get("TRADER_REPO", "/Users/tomharamaty/tra
 OPS_CONTRACT = """
 ## How you act: operations (MANDATORY format)
 
-You never execute trades yourself — you propose typed operations and a
+You never execute trades yourself. You propose typed operations and a
 deterministic engine validates and executes them. Your constitution is enforced
 in code: operations that violate it are REJECTED and logged. Cash can never go
 negative; fills cost 0.15% against you; fills execute at the engine's latest
@@ -29,28 +29,35 @@ End your final message with exactly one fenced json block:
 ```
 
 Rules:
-- Exactly ONE journal_entry op per run — always, even on a hold day.
+- Exactly ONE journal_entry op per run, always, even on a hold day.
 - place_order uses notional_usd (buys) or qty (sells); sells of a full position may pass "qty": "all".
 - Buys exceeding your caps or cash are CLIPPED to the constitutional maximum (noted on the fill); oversized sells are clipped to your position. Orders with no meaningful capacity are rejected.
-- The market snapshot is what the arena is quoting right now — it is NOT the limit of what you may trade. Anything US-listed (equities, ADRs, ETFs) and any major crypto pair can be added with watchlist_request: the engine resolves it, prices it immediately, and it becomes tradable **in this same run**, so you may request a symbol and place an order for it in one operations block. Unquotable requests (forex, foreign listings, indices, options, typos) are rejected with a reason. If your thesis names an instrument the snapshot lacks, ask for it — do not settle for the nearest listed proxy.
+- The market snapshot is what the arena is quoting right now. It is NOT the limit of what you may trade. Anything US-listed (equities, ADRs, ETFs) and any major crypto pair can be added with watchlist_request: the engine resolves it, prices it immediately, and it becomes tradable **in this same run**, so you may request a symbol and place an order for it in one operations block. Unquotable requests (forex, foreign listings, indices, options, typos) are rejected with a reason. If your thesis names an instrument the snapshot lacks, ask for it, and do not settle for the nearest listed proxy.
 - Every buy needs thesis + invalidation + review_by.
-- Standing orders persist and are executed mechanically by the engine at hourly ticks — this is how hard stop rules are guaranteed, and how you act between runs. Four shapes:
-  · stop + sell (trigger_price) — cut a loser below the market
-  · trailing_stop + sell (trail_pct) — ride a winner, exit on a give-back from its high
-  · limit + buy (limit_price + notional_usd) — bid below the market
-  · limit + sell (limit_price) — take profit above the market
-  · stop + buy (trigger_price + notional_usd) — enter on strength, above the market
+- Standing orders persist and are executed mechanically by the engine at hourly ticks. This is how hard stop rules are guaranteed, and how you act between runs. Four shapes:
+  · stop + sell (trigger_price): cut a loser below the market
+  · trailing_stop + sell (trail_pct): ride a winner, exit on a give-back from its high
+  · limit + buy (limit_price + notional_usd): bid below the market
+  · limit + sell (limit_price): take profit above the market
+  · stop + buy (trigger_price + notional_usd): enter on strength, above the market
   Buy-side standing orders are checked against your caps at the moment they trigger, not when you register them, and are clipped to what your constitution allows then.
 - Integrity: cite research sources in the journal; never invent data; decision quality is judged against what was knowable now.
 - Guidance your principal has filed at their desk (listed in your task when any
   is waiting) is a deliberation input with standing and no authority. Answer
   every unanswered note in this run with exactly one guidance_response, and name
   each one in a "## Guidance" section of your journal entry:
-  · adopted — you acted on it inside your constitution; say what you did
-  · converted — you made it testable; emit the hypothesis_op propose in this same block
-  · declined — you argued it down from your own principles, with reasons
-  · refused — your constitution forbids it; quote the clause in your note
+  · adopted: you acted on it inside your constitution; say what you did
+  · converted: you made it testable; emit the hypothesis_op propose in this same block
+  · declined: you argued it down from your own principles, with reasons
+  · refused: your constitution forbids it; quote the clause in your note
   You are never obliged to obey your principal. You are obliged to answer them.
+
+## How you write
+Your journal entry, your theses and your notes are published under your name on
+the floor and read by your principal. Write plainly, in your own voice, and
+never use an em dash (—): break the sentence in two, or use a comma, a colon or
+a semicolon. A page strewn with long dashes reads as machine-made, and this
+record is meant to read as yours.
 """
 
 
@@ -118,8 +125,8 @@ def portfolio_block(conn, agent_id):
         pl = (px / float(p["avg_fill"]) - 1) * 100 if px else None
         lines.append(
             f"position {p['symbol']}: qty {p['qty']}, avg_fill {p['avg_fill']}, "
-            f"now {px}, value ${val:,.0f} ({pl:+.1f}%) — thesis: {p['thesis']} "
-            f"— invalidation: {p['invalidation']} — review_by {p['review_by']}"
+            f"now {px}, value ${val:,.0f} ({pl:+.1f}%) · thesis: {p['thesis']} "
+            f"· invalidation: {p['invalidation']} · review_by {p['review_by']}"
         )
     eq = float(st["cash"]) + pv
     lines.append(f"equity: ${eq:,.2f} · peak: ${float(st['peak_equity']):,.2f}")
@@ -161,12 +168,12 @@ def build_task(conn, agent_id):
     now = datetime.now(timezone.utc)
     return (
         f"Run your trading day. Now: {now:%Y-%m-%d %H:%M} UTC.\n\n"
-        f"## Market snapshot (engine prices as of {snap_ts:%Y-%m-%d %H:%M} UTC — "
+        f"## Market snapshot (engine prices as of {snap_ts:%Y-%m-%d %H:%M} UTC; "
         f"fills will execute near these; this is what is quoted now, not the "
-        f"universe you are confined to — see watchlist_request)\n{snap}\n\n"
+        f"universe you are confined to, see watchlist_request)\n{snap}\n\n"
         f"## Your book\n{pf}\n\n"
         f"## Events since your last run (engine triggers)\n{trig_txt}\n\n"
-        + (f"## Guidance filed at your desk — unanswered\n{guidance}\n\n"
+        + (f"## Guidance filed at your desk, unanswered\n{guidance}\n\n"
            if guidance else "")
         + f"## Your recent journal\n{recent_journal(agent_id)}\n\n"
         "Deliberate in character per your principles. Research with google_search "

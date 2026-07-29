@@ -194,13 +194,13 @@ def test_harness_embeds_floor_and_principal_limits(tmp_path):
     text = (d / "harness.md").read_text()
     assert text.startswith("# Calla — harness")
     for section in ("## Identity", "## Mandate",
-                    "## Constitution (hard limits — cannot be changed by reflection)",
+                    "## Constitution (hard limits, cannot be changed by reflection)",
                     "## Parameters"):
         assert section in text
     # arena floor, always present
     assert "Long-only, cash-settled" in text
     assert "No margin, no borrowing, no shorting, no options, no futures" in text
-    assert "anything the arena can price" in text
+    assert "Anything the arena can price" in text
     assert "requested by the agent and granted if they resolve" in text
     # a market the interview did not charter is denied, not silently open
     assert "Crypto: not permitted. [principal-set]" in text
@@ -422,3 +422,26 @@ def test_a_garbage_avatar_still_never_rejects_a_seat():
         cleaned, _ = validate(packet)
         assert cleaned["avatar"]["base"] == seating.DEFAULT_AVATAR["base"]
         assert cleaned["avatar"]["chosen"] is False
+
+
+def test_the_universe_chip_survives_the_dash_free_clause(tmp_path):
+    """The floor's universe chip used to be cut at the em dash that separated a
+    trader's own universe from the watchlist boilerplate. The clause is written
+    as two sentences now, so the parser has to find the break at the period."""
+    from jobs.site import harness_universe
+
+    _, d, _ = seeded(tmp_path)
+    text = (d / "harness.md").read_text()
+    assert "— anything the arena can price" not in text
+    assert harness_universe(d / "harness.md") == PACKET["universe"].rstrip(".")
+
+
+def test_nothing_the_engine_writes_into_a_charter_carries_an_em_dash(tmp_path):
+    """Prose the engine authors for a newborn is published under the trader's
+    name. Structural headings are the record's own convention and stay."""
+    _, d, _ = seeded(tmp_path)
+    for name in ("harness.md", "principles.md", "hypotheses.md"):
+        for line in (d / name).read_text().splitlines():
+            if line.startswith("#") or line.lower().startswith("- origin:"):
+                continue
+            assert "—" not in line, f"{name}: {line}"

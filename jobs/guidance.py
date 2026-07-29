@@ -33,11 +33,11 @@ MAX_TEXT = 4000
 PER_DAY = 3  # notes one principal may file for one trader in a day
 
 HEADER = ("# {name} — guidance\n\n"
-          "Notes {name} carried from its desk — the principal's own words, or "
+          "Notes {name} carried from its desk: the principal's own words, or "
           "{name}'s note of what a conversation with them settled. Guidance has "
           "standing and no authority: {name} must answer every note at its next "
           "session, and may decline or refuse it with reasons. Entries are "
-          "appended, never rewritten — an answer is a new entry under the same "
+          "appended, never rewritten; an answer is a new entry under the same "
           "id.\n")
 
 DISPOSITIONS = ("adopted", "converted", "declined", "refused")

@@ -414,6 +414,14 @@ def test_the_model_is_never_shown_a_figure():
     assert stray == [], f"the model can see {stray}"
 
 
+def test_the_model_is_never_shown_an_em_dash():
+    """Whatever the redacted note is written in, the model writes back. When the
+    price stripper left an em dash behind every figure, the letters came back
+    strewn with them, which is the one punctuation the prompt forbids."""
+    assert "—" not in deprice("EPS ($3.32 vs $3.22 est) beat; trimmed 40%")
+    assert "—" not in facts_for_voice(_p())
+
+
 def test_a_position_count_is_words_not_a_number():
     assert "a couple of position" in facts_for_voice(_p())
 

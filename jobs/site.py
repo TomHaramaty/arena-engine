@@ -268,6 +268,22 @@ def arena_curve(conn):
     return out
 
 
+AVATAR_PUBLIC_KEYS = ("base", "color", "costume", "acc")
+
+
+def public_avatar(avatar):
+    """The four values the floor needs to draw a face, and nothing else.
+
+    config["avatar"] also carries `chosen` — whether the principal touched the
+    seat's picker or kept the random face it offered. That is provenance for
+    us; it is not a fact about the trader worth printing on the floor, and
+    arena.json is served publicly. Projecting explicitly also stops any future
+    config key from reaching a public file by accident.
+    """
+    avatar = avatar if isinstance(avatar, dict) else {}
+    return {k: avatar[k] for k in AVATAR_PUBLIC_KEYS if k in avatar}
+
+
 def build_agent(conn, row, prices):
     aid = row["id"]
     st = conn.execute("select * from agent_state where agent_id=%s", (aid,)).fetchone()
@@ -325,7 +341,7 @@ def build_agent(conn, row, prices):
     # avatar colour so line and portrait agree.
     cfg = row["config"] if isinstance(row["config"], dict) else {}
     avatar = cfg.get("avatar") if isinstance(cfg.get("avatar"), dict) else None
-    avatar = avatar or meta.get("avatar") or AVATAR_BACKFILL.get(aid) or DEFAULT_AVATAR
+    avatar = public_avatar(avatar or meta.get("avatar") or AVATAR_BACKFILL.get(aid) or DEFAULT_AVATAR)
     color = meta.get("color") or AVATAR_PALETTE[avatar["color"] % len(AVATAR_PALETTE)]
 
     # Who chartered it. A principal is named on the floor only if they asked to

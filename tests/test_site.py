@@ -154,3 +154,30 @@ def test_system_block_publishes_freshness_and_nothing_else():
     assert block == {"last_update": "Jul 28 14:03", "symbols_tracked": 81}
     for banned in ("total_cost_usd", "runs", "ops", "triggers", "tokens_in"):
         assert banned not in block
+
+
+# ---- what the public file may say about a face ---------------------------
+
+def test_chosen_never_reaches_the_public_avatar():
+    """`chosen` records whether the principal touched the seat's picker. It is
+    provenance for the operator, not something the floor announces about a
+    trader — and arena.json is served publicly."""
+    cfg_avatar = {"base": "owl", "color": 3, "costume": "professor",
+                  "acc": "rounds", "chosen": False}
+    assert site.public_avatar(cfg_avatar) == {
+        "base": "owl", "color": 3, "costume": "professor", "acc": "rounds"}
+    assert "chosen" not in site.public_avatar(cfg_avatar)
+
+
+def test_public_avatar_drops_any_key_it_was_not_asked_for():
+    """The projection is a whitelist, so a future config key cannot leak into a
+    public file by being added upstream."""
+    out = site.public_avatar({"base": "fox", "color": 0, "costume": "suit",
+                              "acc": "none", "chosen": True,
+                              "owner_email": "someone@example.com", "notes": "x"})
+    assert set(out) == set(site.AVATAR_PUBLIC_KEYS)
+
+
+def test_public_avatar_survives_a_missing_or_malformed_avatar():
+    for garbage in (None, "owl", 7, []):
+        assert site.public_avatar(garbage) == {}

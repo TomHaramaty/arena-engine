@@ -389,3 +389,36 @@ def test_updates_preference_sanitizes_to_closed_vocabulary():
         packet["updates"] = garbage
         cleaned, _ = validate(packet)
         assert cleaned["updates"] == seating.DEFAULT_UPDATES
+
+
+def test_avatar_records_whether_the_principal_chose_it():
+    """The seat rolls a random opening face, so the four values can no longer
+    say whether anyone touched the picker. `chosen` carries that, and only a
+    literal true counts — a missing or truthy-ish value is not consent."""
+    packet = copy.deepcopy(PACKET)
+    packet["avatar"] = {"base": "owl", "color": 3, "costume": "professor",
+                        "acc": "rounds", "chosen": True}
+    cleaned, _ = validate(packet)
+    assert cleaned["avatar"] == {"base": "owl", "color": 3, "costume": "professor",
+                                 "acc": "rounds", "chosen": True}
+
+    for not_chosen in (False, None, "true", 1, "yes"):
+        packet["avatar"] = {"base": "owl", "color": 3, "costume": "professor",
+                            "acc": "rounds", "chosen": not_chosen}
+        cleaned, _ = validate(packet)
+        assert cleaned["avatar"]["chosen"] is False, not_chosen
+
+    # an avatar with no `chosen` at all (an older client) is not a claim of choice
+    packet["avatar"] = {"base": "owl", "color": 3, "costume": "professor", "acc": "rounds"}
+    cleaned, _ = validate(packet)
+    assert cleaned["avatar"]["chosen"] is False
+
+
+def test_a_garbage_avatar_still_never_rejects_a_seat():
+    packet = copy.deepcopy(PACKET)
+    for garbage in (None, "owl", 7, ["fox"], {"base": "dragon", "color": 99,
+                                              "costume": "spacesuit", "acc": "halo"}):
+        packet["avatar"] = garbage
+        cleaned, _ = validate(packet)
+        assert cleaned["avatar"]["base"] == seating.DEFAULT_AVATAR["base"]
+        assert cleaned["avatar"]["chosen"] is False

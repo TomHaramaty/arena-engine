@@ -130,6 +130,12 @@ def _avatar(a):
         "color": color if 0 <= color < AVATAR_COLORS else DEFAULT_AVATAR["color"],
         "costume": costume if costume in AVATAR_COSTUMES else DEFAULT_AVATAR["costume"],
         "acc": acc if acc in AVATAR_DETAILS else DEFAULT_AVATAR["acc"],
+        # Did the principal actually touch the picker, or is this the seat's
+        # random opening offer? The seat rolls a face rather than defaulting to
+        # a constant one, so the values alone can no longer answer that. Kept
+        # out of the published arena.json by jobs/site.py — it is provenance
+        # for us, not a fact about the trader worth printing on the floor.
+        "chosen": a.get("chosen") is True,
     }
 
 

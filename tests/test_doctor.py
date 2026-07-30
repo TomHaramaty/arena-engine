@@ -212,6 +212,30 @@ def test_no_repo_means_no_opinion_about_the_record(tmp_path):
     assert doctor.missing_journals([run()], tmp_path / "nope") == []
 
 
+def test_a_run_newer_than_this_working_copy_is_not_missing(tmp_path):
+    """Run from a laptop two hours behind the record, the check reported a real
+    principal's first session as missing. A run that completed after this copy
+    was taken cannot be in it."""
+    (tmp_path / "agents" / "ledger" / "journal").mkdir(parents=True)
+    taken = NOW - timedelta(hours=3)
+    assert doctor.missing_journals(
+        [run(agent="ledger", ago_h=1)], tmp_path, since=taken) == []
+    # ...and a run from before it is still judged
+    assert doctor.missing_journals(
+        [run(agent="ledger", ago_h=5)], tmp_path, since=taken) != []
+
+
+def test_the_checkout_time_is_read_from_the_repo(tmp_path):
+    import subprocess
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "f").write_text("x")
+    for args in (["add", "f"],
+                 ["-c", "user.email=a@b", "-c", "user.name=a", "commit", "-qm", "x"]):
+        subprocess.run(["git", "-C", str(tmp_path)] + args, check=True)
+    assert doctor.checkout_time(tmp_path) is not None
+    assert doctor.checkout_time(tmp_path / "not-a-repo") is None
+
+
 def test_a_trader_with_no_rendered_face_is_reported_with_the_fix():
     findings = doctor.missing_faces(["vector"], lambda url: 404)
     assert findings[0].check == "missing-face"

@@ -213,16 +213,38 @@ def stale_triggers(triggers, now):
     ]
 
 
-def missing_journals(runs, repo):
+def checkout_time(repo):
+    """When this working copy last saw the record. A run that completed after
+    that cannot be expected to be in it.
+
+    Without this the check is only honest against a fresh clone, which is how CI
+    runs it — but run from a laptop two hours behind, it reports a real
+    principal's first session as missing from the record. A checker that is wrong
+    when a human runs it by hand is a checker that human stops running.
+    """
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo), "log", "-1", "--format=%cI"],
+            capture_output=True, text=True, check=True).stdout.strip()
+        return datetime.fromisoformat(out)
+    except Exception:
+        return None
+
+
+def missing_journals(runs, repo, since=None):
     """Every completed session left an entry. Check the file is really there —
     the record is the published artifact, and Postgres saying 'completed' is not
     the same fact as a reader being able to read it."""
     if not repo or not repo.exists():
         return []
+    cutoff = since if since is not None else checkout_time(repo)
     out = []
     for r in runs:
         if r["status"] != "completed":
             continue
+        if cutoff is not None and r["started"] > cutoff:
+            continue          # this working copy predates the entry
         day = r["started"].astimezone(timezone.utc).date().isoformat()
         path = repo / "agents" / r["agent_id"] / "journal" / f"{day}.md"
         if not path.exists():

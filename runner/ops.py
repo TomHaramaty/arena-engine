@@ -71,6 +71,10 @@ def validate_and_apply(conn, agent, run_id, ops, dry=False, resolver=None):
 
     for op in ops:
         t = op.get("type")
+        # A DB error mid-op (deadlock, etc.) aborts the transaction; without a
+        # savepoint the record() call below would itself raise
+        # InFailedSqlTransaction instead of recording the rejection.
+        conn.execute("SAVEPOINT op")
         try:
             if t == "journal_entry":
                 record(op, "accepted")
@@ -331,7 +335,10 @@ def validate_and_apply(conn, agent, run_id, ops, dry=False, resolver=None):
             else:
                 record(op, "rejected", f"unknown op type {t}")
         except Exception as e:  # one bad op never poisons the batch
+            conn.execute("ROLLBACK TO SAVEPOINT op")
             record(op, "rejected", f"error: {e}")
+        finally:
+            conn.execute("RELEASE SAVEPOINT op")
 
     if not dry:
         conn.commit()

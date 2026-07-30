@@ -24,18 +24,11 @@ FLOOR_POLL_SECONDS = int(os.environ.get("FLOOR_POLL_SECONDS", "5"))
 
 
 def floor_has(agent_id):
-    """True once the deployed site actually serves this agent.
-
-    A sandbox trader is published under its own key rather than on the floor —
-    the wait is the same wait (its principal's desk cannot open until the deploy
-    lands), so the bell watches both lists or it would burn its whole cap on
-    every test seating.
-    """
+    """True once the deployed floor actually serves this agent."""
     r = requests.get(FLOOR_URL, timeout=15, headers={"Cache-Control": "no-cache"})
     r.raise_for_status()
-    data = r.json()
-    published = (data.get("agents") or []) + (data.get("sandbox") or [])
-    return any((a.get("id") or "").lower() == agent_id.lower() for a in published)
+    return any((a.get("id") or "").lower() == agent_id.lower()
+               for a in r.json().get("agents", []))
 
 
 def await_floor(agent_id):

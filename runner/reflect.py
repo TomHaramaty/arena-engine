@@ -134,7 +134,7 @@ def why_now(conn, agent_id, since):
 
 def build_reflection_prompt(conn, agent_id):
     since = last_reflection_ts(conn, agent_id)
-    d = context.agent_dir(agent_id)
+    d = context.TRADER_REPO / "agents" / agent_id
     marks = conn.execute(
         "select ts, equity, bench_index from equity_marks where agent_id=%s and ts>%s order by ts",
         (agent_id, since),
@@ -198,7 +198,7 @@ def call_pro(prompt):
 def apply_reflection(conn, agent_id, run_id, R):
     """Apply the reflection's changes to prose files + record ops. Returns summary lines."""
     date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    d = context.agent_dir(agent_id)
+    d = context.TRADER_REPO / "agents" / agent_id
     P = prose.SectionFile(d / "principles.md")
     H = prose.SectionFile(d / "hypotheses.md")
     seq, summary = 0, []

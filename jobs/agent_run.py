@@ -9,13 +9,13 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 
-from engine import core, db, sandbox
+from engine import core, db
 from runner import brain, context, ops
 
 
 def commit_journal(agent_id, title, body_md, date_str):
     title = re.sub(r"^\s*\d{4}-\d{2}-\d{2}\s*[—-]+\s*", "", title or "run")
-    path = context.agent_dir(agent_id) / "journal" / f"{date_str}.md"
+    path = context.TRADER_REPO / "agents" / agent_id / "journal" / f"{date_str}.md"
     header = f"# {date_str} — {title}\n\n"
     if path.exists():  # append-only: same-day reruns append, never overwrite
         content = path.read_text() + f"\n\n---\n\n{header}{body_md}\n"
@@ -23,10 +23,6 @@ def commit_journal(agent_id, title, body_md, date_str):
         content = f"{header}{body_md}\n"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
-    if sandbox.in_sandbox(path):
-        # A test trader keeps a real journal — it just never enters the record.
-        print(f"[{agent_id}] sandbox journal written, not committed: {path}")
-        return
     repo = str(context.TRADER_REPO)
     subprocess.run(["git", "-C", repo, "add", str(path)], check=True)
     subprocess.run(

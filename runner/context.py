@@ -3,8 +3,6 @@ import os
 import pathlib
 from datetime import datetime, timezone
 
-from engine import sandbox
-
 TRADER_REPO = pathlib.Path(os.environ.get("TRADER_REPO", "/Users/tomharamaty/trader"))
 
 OPS_CONTRACT = """
@@ -67,15 +65,8 @@ def read(p):
     return p.read_text(encoding="utf-8") if p.exists() else ""
 
 
-def agent_dir(agent_id):
-    """The trader's prose directory — the record's, or the sandbox's if it has
-    one (engine/sandbox.py). A test trader thinks out of exactly the same files;
-    they simply are not committed."""
-    return sandbox.agent_dir(TRADER_REPO, agent_id)
-
-
 def build_agents_md(agent_id):
-    d = agent_dir(agent_id)
+    d = TRADER_REPO / "agents" / agent_id
     return (
         f"{read(d / 'harness.md')}\n\n{read(d / 'principles.md')}\n\n"
         f"{read(d / 'hypotheses.md')}\n\n{OPS_CONTRACT}"
@@ -83,7 +74,7 @@ def build_agents_md(agent_id):
 
 
 def recent_journal(agent_id, n=2):
-    jd = agent_dir(agent_id) / "journal"
+    jd = TRADER_REPO / "agents" / agent_id / "journal"
     if not jd.exists():
         return ""
     files = sorted(jd.glob("*.md"), reverse=True)[:n]

@@ -25,7 +25,7 @@ import sys
 import traceback
 from datetime import datetime, timezone
 
-from engine import db, sandbox, seating
+from engine import db, seating
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TRADER = pathlib.Path(os.environ.get("TRADER_REPO", "/Users/tomharamaty/trader"))
@@ -52,12 +52,9 @@ def submitted_applications(fs):
 
 def taken_ids(conn):
     ids = {r["id"] for r in conn.execute("select id from agents").fetchall()}
-    # The sandbox tree counts too: a leftover directory from a half-finished
-    # purge would otherwise let a new trader take the name and inherit its
-    # prose, since write_seed_files never overwrites what already exists.
-    for agents_dir in (TRADER / "agents", TRADER / "sandbox" / "agents"):
-        if agents_dir.exists():
-            ids |= {p.name for p in agents_dir.iterdir() if p.is_dir()}
+    agents_dir = TRADER / "agents"
+    if agents_dir.exists():
+        ids |= {p.name for p in agents_dir.iterdir() if p.is_dir()}
     return ids
 
 
@@ -73,16 +70,10 @@ def listed_symbols(conn):
     ).fetchall()}
 
 
-def seat(conn, cleaned, uid, app_id, today, email=None):
+def seat(conn, cleaned, uid, app_id, today):
     """Seat a validated applicant. Idempotent — safe to re-run after a partial
-    seating. Returns (trader_repo_paths_touched, tincture_pair_or_None).
-
-    An admin principal seats into the sandbox: tier 'test', no tincture, prose
-    into the gitignored tree, nothing on the floor. It runs like any other
-    trader — that is the point of a test — and `python -m jobs.purge` destroys
-    it completely. See design/account-deletion-2026-07-29.md."""
+    seating. Returns (trader_repo_paths_touched, tincture_pair_or_None)."""
     aid = cleaned["id"]
-    sandboxed = sandbox.is_admin(uid, email)
     syms = cleaned["benchmark"]["symbols"]
     bench = {"symbols": syms,
              "weights": [round(1.0 / len(syms), 6)] * len(syms),
@@ -100,24 +91,17 @@ def seat(conn, cleaned, uid, app_id, today, email=None):
               "updates": cleaned.get("updates") or seating.DEFAULT_UPDATES}
     conn.execute(
         """insert into agents (id, name, archetype, brain, config, status, tier, owner_uid)
-           values (%s,%s,%s,%s,%s,'active',%s,%s)
+           values (%s,%s,%s,%s,%s,'active','seated',%s)
            on conflict (id) do nothing""",
         (aid, cleaned["name"], cleaned["archetype"], BRAIN, json.dumps(config),
-         sandbox.TIER if sandboxed else "seated", uid))
+         uid))
     conn.execute(
         """insert into agent_state (agent_id, cash, peak_equity, launched, bench)
            values (%s,%s,%s,null,%s) on conflict (agent_id) do nothing""",
         (aid, STARTING_CASH, STARTING_CASH, json.dumps(bench)))
     conn.commit()
 
-    written = seating.write_seed_files(TRADER, cleaned, today, app_id,
-                                       sandbox_seat=sandboxed)
-    if sandboxed:
-        # No pair. The armory is a registry of the record's colours, and it says
-        # pairs are never cycled or reassigned — so a test trader that will be
-        # deleted must never hold one. It wears transient slate; nothing on the
-        # floor renders it anyway.
-        return written, None
+    written = seating.write_seed_files(TRADER, cleaned, today, app_id)
     armory_path = TRADER / "arena" / "armory.json"
     pair = seating.assign_tincture(armory_path, aid, today)
     return written + [armory_path], pair
@@ -127,8 +111,7 @@ def commit_trader(paths, aid, today):
     """CI only: the tick workflow clones a fresh trader repo and holds its SSH
     key (same push pattern as jobs/agent_run.commit_journal). Local runs leave
     the trader working tree uncommitted for the operator to review."""
-    paths = [p for p in paths if not sandbox.in_sandbox(p)]  # never the sandbox
-    if os.environ.get("GITHUB_ACTIONS") != "true" or not paths:
+    if os.environ.get("GITHUB_ACTIONS") != "true":
         print(f"  local run — trader repo changes left uncommitted ({len(paths)} paths)")
         return
     repo = str(TRADER)
@@ -146,10 +129,6 @@ def process(conn, doc, today):
     from google.cloud import firestore
     data = doc.to_dict() or {}
     uid = str(data.get("uid") or "")
-    # The address the principal signed in with — the admin allowlist keys on
-    # it, because a test loop that deletes its Auth user mints a new uid every
-    # cycle and a uid allowlist would work exactly once.
-    email = str(data.get("email") or "")
     packet = data.get("packet")
     name = (str(packet.get("name") or "").strip().lower()
             if isinstance(packet, dict) else "")
@@ -164,22 +143,17 @@ def process(conn, doc, today):
                 packet, taken_ids=set(), has_live_agent=False,
                 listed_symbols=None, today=today)
             if cleaned and not reasons:
-                paths, _ = seat(conn, cleaned, uid, doc.id, today, email)
+                paths, _ = seat(conn, cleaned, uid, doc.id, today)
                 commit_trader(paths, name, today)
             doc.reference.update({"status": "seated", "agent_id": name,
                                   "seatedAt": firestore.SERVER_TIMESTAMP})
             print(f"  {doc.id}: resumed — {name} already seated")
             return
 
-    # One live agent per principal — waived for an admin, who holds a real
-    # trader on the floor permanently and so could otherwise never seat a test
-    # one. The waiver lives here, where we know who is who; validate_packet
-    # must go on judging every packet by the same rules.
     cleaned, reasons = seating.validate_packet(
         packet,
         taken_ids=taken_ids(conn),
-        has_live_agent=(bool(uid) and uid in live_uids(conn)
-                        and not sandbox.is_admin(uid, email)),
+        has_live_agent=bool(uid) and uid in live_uids(conn),
         listed_symbols=listed_symbols(conn),
         today=today)
     if not uid:
@@ -191,14 +165,12 @@ def process(conn, doc, today):
         print(f"  {doc.id}: REJECTED — " + " | ".join(reasons))
         return
 
-    paths, pair = seat(conn, cleaned, uid, doc.id, today, email)
+    paths, pair = seat(conn, cleaned, uid, doc.id, today)
     commit_trader(paths, cleaned["id"], today)
     doc.reference.update({"status": "seated", "agent_id": cleaned["id"],
                           "seatedAt": firestore.SERVER_TIMESTAMP})
     tinct = (f"tincture № {pair['n']} {pair['name']}" if pair
-             else ("SANDBOX — no tincture, not on the floor, purgeable"
-                   if sandbox.is_admin(uid, email)
-                   else "tincture pending minting (slate)"))
+             else "tincture pending minting (slate)")
     print(f"  {doc.id}: SEATED — {cleaned['id']} · {tinct}")
 
 

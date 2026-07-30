@@ -21,6 +21,35 @@ from engine import observability as obs
 from jobs.agent_run import run_agent
 
 
+# Two bells a day, plus room for the events that matter — a stop filling, a
+# position closing, a watchlist grant. Beyond this something is waking an agent
+# in a loop, and the arena stops paying for it.
+#
+# This is a circuit breaker, not a diagnosis. The drawdown loop found on
+# 2026-07-30 is fixed at its cause (engine/core.drawdown_wake), but it ran for
+# two days spending brain runs and appending journal entries to an append-only
+# record before anyone noticed, and nothing in the system would have stopped it.
+# The next loop will have a different cause and the same shape, so the ceiling is
+# on the shape.
+#
+# Only event dispatch is capped. The scheduled bells are the sessions the arena
+# exists for, they are already once-per-slot, and an agent must never lose one
+# because its morning was noisy.
+MAX_EVENT_SESSIONS_PER_DAY = 6
+
+
+def over_ceiling(conn, limit=MAX_EVENT_SESSIONS_PER_DAY):
+    """{agent_id: sessions today} for agents that have had too many."""
+    rows = conn.execute(
+        """select agent_id, count(*) n from runs
+           where (started at time zone 'utc')::date = (now() at time zone 'utc')::date
+             and trigger <> 'reflection'
+           group by agent_id having count(*) >= %s""",
+        (limit,),
+    ).fetchall()
+    return {r["agent_id"]: r["n"] for r in rows}
+
+
 def daily_slot():
     slot = os.environ.get("DAILY_SLOT")
     if slot in ("open", "close"):
@@ -37,6 +66,12 @@ def dispatch(triggers_only):
                where a.status='active'"""
         ).fetchall()
         trigger = "event"
+        spent = over_ceiling(conn)
+        for aid, n in sorted(spent.items()):
+            print(f"[{aid}] CEILING: {n} sessions today (limit "
+                  f"{MAX_EVENT_SESSIONS_PER_DAY}) — event wakes held until "
+                  f"tomorrow; something is triggering in a loop")
+        rows = [r for r in rows if r["id"] not in spent]
     else:
         slot = daily_slot()
         # Two guards make duplicate triggers harmless:

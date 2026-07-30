@@ -78,6 +78,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FINNHUB_KEY: ${{ secrets.FINNHUB_KEY }}
           TRADER_REPO: ${{ github.workspace }}/trader
           GIT_SSH_COMMAND: ssh -i ~/.ssh/trader_key -o IdentitiesOnly=yes
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/fs_sa.json

@@ -54,6 +54,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FINNHUB_KEY: ${{ secrets.FINNHUB_KEY }}
           DAILY_SLOT: ${{ inputs.slot }}
           TRADER_REPO: ${{ github.workspace }}/trader
           GIT_SSH_COMMAND: ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes

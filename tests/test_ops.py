@@ -497,6 +497,61 @@ def test_a_granted_symbol_is_tradable_in_the_same_run():
     assert len(granted) == 1 and granted[0]["handled"] is True
 
 
+# ---------- a database error mid-batch must not take the session with it ----------
+
+def poisoned(fail_on, **kw):
+    """A connection that deadlocks on one statement and then refuses everything,
+    the way Postgres really does."""
+    kw.setdefault("watchlist", {"AMD": "equity", "SPY": "etf"})
+    kw.setdefault("ticks", {"AMD": 100.0, "SPY": 500.0})
+    return FakeConn(fail_on=fail_on, **kw)
+
+
+def test_a_deadlock_mid_op_is_recorded_as_a_rejection():
+    """The failure this closes crashed vector's first bell on 2026-07-29.
+
+    A DB error inside an op leaves the transaction aborted, so `record()`'s own
+    insert used to raise InFailedSqlTransaction — a second exception, thrown from
+    inside the first one's handler, escaping validate_and_apply entirely. The
+    session died and every op accepted earlier in the batch rolled back with it.
+    """
+    c = poisoned("insert into fills")
+    results = apply(c, agent(max_single_pct=0.25), journal(), buy())
+    assert [v for _, v, _ in results] == ["accepted", "rejected"]
+    assert "deadlock" in results[1][2]
+
+
+def test_the_ops_after_a_deadlock_still_get_their_session():
+    """One bad op costs its author that op — a promise the old code could not
+    keep once the failure was a database error rather than a bad payload."""
+    c = poisoned("insert into fills")          # only the first buy hits it
+    results = apply(c, agent(max_single_pct=0.5), journal(),
+                    buy(symbol="AMD"), buy(symbol="SPY", notional=5_000))
+    assert [v for _, v, _ in results] == ["accepted", "rejected", "accepted"]
+    assert c.position_qty("SPY") > 0
+
+
+def test_a_deadlock_does_not_leave_the_failed_op_half_applied():
+    """Rolling back to the savepoint undoes whatever the op wrote before it
+    failed, so an op lands whole or not at all."""
+    c = poisoned("insert into fills")
+    apply(c, agent(max_single_pct=0.25), journal(), buy(notional=10_000))
+    assert c.aborted is False
+    assert c.savepoints == []                  # every savepoint released
+
+
+def test_the_journal_still_survives_a_deadlocked_trade():
+    """jobs/agent_run reads the accepted journal_entry out of these results to
+    write the record. If the batch escapes, there is no entry and the run dies
+    with nothing filed."""
+    c = poisoned("insert into fills")
+    results = apply(c, agent(max_single_pct=0.25), journal("the deadlocked day"),
+                    buy())
+    entry = next(o for o, v, _ in results
+                 if o.get("type") == "journal_entry" and v == "accepted")
+    assert entry["title"] == "the deadlocked day"
+
+
 def test_a_granted_symbol_still_answers_to_the_class_caps():
     """Being on the watchlist is permission to price something, never
     permission to hold it — the charter still decides."""

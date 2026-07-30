@@ -29,6 +29,18 @@ class FakeSQLError(AssertionError):
     """A statement this fake does not know. Teach it, never ignore it."""
 
 
+class Deadlock(Exception):
+    """Stands in for psycopg.errors.DeadlockDetected."""
+
+
+class InFailedSqlTransaction(Exception):
+    """Postgres' answer to every statement after an error in a transaction:
+    "current transaction is aborted, commands ignored until end of transaction
+    block". Modelling this is the whole point — an except: handler that tries to
+    record the failure gets THIS instead, and a second exception escapes from
+    inside the first one's handler."""
+
+
 def _norm(sql):
     return " ".join(str(sql).split()).lower()
 
@@ -55,7 +67,14 @@ class FakeConn:
     def __init__(self, *, cash=100_000.0, positions=None, ticks=None,
                  watchlist=None, orders=None, guidance=None, agents=None,
                  agent_id="tempo", config=None, marks=None, triggers=None,
-                 peak=None, bench=None):
+                 peak=None, bench=None, fail_on=None, fail_times=1):
+        # fail_on: a statement fragment that raises a Deadlock the first
+        # `fail_times` times it is executed, and leaves the transaction aborted
+        # afterwards exactly as Postgres does.
+        self.fail_on = _norm(fail_on) if fail_on else None
+        self.fail_times = fail_times
+        self.aborted = False
+        self.savepoints = []
         self.agent_id = agent_id
         self.cash = float(cash)
         self.peak_equity = float(peak if peak is not None else cash)
@@ -84,6 +103,14 @@ class FakeConn:
     def execute(self, sql, args=None):
         s, a = _norm(sql), tuple(args or ())
         self.writes.append((s, a))
+        if self.aborted and not s.startswith(("rollback", "commit")):
+            raise InFailedSqlTransaction(
+                "current transaction is aborted, commands ignored until end of "
+                "transaction block")
+        if self.fail_on and self.fail_on in s and self.fail_times > 0:
+            self.fail_times -= 1
+            self.aborted = True
+            raise Deadlock("deadlock detected")
         for pattern, handler in self._routes():
             if s.startswith(pattern):
                 return Result(handler(s, a) or [])
@@ -157,6 +184,10 @@ class FakeConn:
             ("update orders set", self._w_order_status),
             ("update guidance set", self._w_guidance),
             ("insert into watchlist", self._w_watchlist),
+            # transaction control
+            ("savepoint", self._w_savepoint),
+            ("rollback to savepoint", self._w_rollback_to),
+            ("release savepoint", self._w_release),
         )
 
     # reads -------------------------------------------------------------
@@ -362,6 +393,21 @@ class FakeConn:
 
     def _w_watchlist(self, s, a):
         self.watchlist[a[0]] = a[2]
+        return []
+
+    def _w_savepoint(self, s, a):
+        self.savepoints.append(s.split()[-1])
+        return []
+
+    def _w_rollback_to(self, s, a):
+        # The one statement Postgres accepts in an aborted transaction: it clears
+        # the abort and leaves the savepoint itself in place.
+        self.aborted = False
+        return []
+
+    def _w_release(self, s, a):
+        if self.savepoints:
+            self.savepoints.pop()
         return []
 
 

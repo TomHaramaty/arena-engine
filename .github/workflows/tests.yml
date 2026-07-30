@@ -1,0 +1,35 @@
+name: tests
+# The engine had 184 tests and nothing that ran them. Every check on the fills,
+# the caps, the constitution and the seating was a check the author remembered to
+# run on a laptop — and the four workflows that write the record ran whatever was
+# on main. This is the gate: a push that breaks the engine fails here, before a
+# market slot finds out.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch: {}
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q "psycopg[binary]" requests google-cloud-firestore pytest
+      # No secrets, no network, no database: the suite runs against pure
+      # functions, tmp git repositories and tests/fakedb.py. If a test ever
+      # needs DATABASE_URL, that test is testing the wrong thing.
+      - name: Run the suite
+        run: python -m pytest -q
+      # The doctor's own checks are unit-tested above; this proves the job's
+      # entry point still assembles, which is what runs on every tick.
+      - name: The doctor loads
+        run: python -c "from jobs import doctor; print(len(doctor.gather.__doc__ or ''), 'ok')"

@@ -4,11 +4,10 @@
   python -m jobs.reflect_run --due            # event-due agents + Friday floor
 """
 import json
-import subprocess
 import sys
 from datetime import datetime, timezone
 
-from engine import db
+from engine import db, gitrepo
 from engine import observability as obs
 from runner import context, reflect
 
@@ -41,13 +40,11 @@ def _as_dt(x):
 
 
 def commit_prose(agent_id, date_str):
-    repo = str(context.TRADER_REPO)
-    subprocess.run(["git", "-C", repo, "add", f"agents/{agent_id}"], check=True)
-    r = subprocess.run(["git", "-C", repo, "diff", "--cached", "--quiet"])
-    if r.returncode != 0:
-        subprocess.run(["git", "-C", repo, "commit", "-q", "-m",
-                        f"reflection({agent_id}): {date_str}"], check=True)
-        subprocess.run(["git", "-C", repo, "push", "-q"], check=True)
+    gitrepo.commit_and_push(
+        context.TRADER_REPO,
+        [context.TRADER_REPO / "agents" / agent_id],
+        f"reflection({agent_id}): {date_str}",
+    )
 
 
 def reflect_agent(conn, agent_id):

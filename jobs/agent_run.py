@@ -5,11 +5,11 @@ Usage: python -m jobs.agent_run <agent_id> [--dry-run] [--trigger scheduled|manu
 """
 import json
 import re
-import subprocess
 import sys
+import traceback
 from datetime import datetime, timezone
 
-from engine import core, db
+from engine import core, db, gitrepo
 from runner import brain, context, ops
 
 
@@ -23,13 +23,31 @@ def commit_journal(agent_id, title, body_md, date_str):
         content = f"{header}{body_md}\n"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
-    repo = str(context.TRADER_REPO)
-    subprocess.run(["git", "-C", repo, "add", str(path)], check=True)
-    subprocess.run(
-        ["git", "-C", repo, "commit", "-q", "-m", f"journal({agent_id}): {date_str} run"],
-        check=True,
+    gitrepo.commit_and_push(
+        context.TRADER_REPO, [path], f"journal({agent_id}): {date_str} run"
     )
-    subprocess.run(["git", "-C", repo, "push", "-q"], check=True)
+
+
+def mark_failed(conn, run_id, exc):
+    """A session that died says so on its own row.
+
+    A run left in 'started' cannot be told apart from one still in progress, and
+    the dispatcher counts it as having run (brain runs are not idempotent, so a
+    partial session is deliberately never re-fired). Seven such rows had
+    accumulated by 2026-07-30 with nothing on them to say what happened. The
+    failure is a fact about the record and belongs in it.
+    """
+    conn.rollback()          # the failing statement may have poisoned the tx
+    try:
+        conn.execute(
+            """update runs set status='failed', finished=now(),
+               meta = meta || %s::jsonb where id=%s and status='started'""",
+            (json.dumps({"error": f"{type(exc).__name__}: {exc}"[:500]}), run_id),
+        )
+        conn.commit()
+    except Exception:        # never let the epitaph bury the exception itself
+        conn.rollback()
+        traceback.print_exc()
 
 
 def run_agent(conn, agent_id, trigger="scheduled", dry=False):
@@ -44,7 +62,15 @@ def run_agent(conn, agent_id, trigger="scheduled", dry=False):
             (agent_id, trigger),
         ).fetchone()["id"]
         conn.commit()
+    try:
+        return _session(conn, agent, agent_id, run_id, dry)
+    except Exception as e:
+        if run_id is not None:
+            mark_failed(conn, run_id, e)
+        raise
 
+
+def _session(conn, agent, agent_id, run_id, dry):
     agents_md = context.build_agents_md(agent_id)
     task, equity = context.build_task(conn, agent_id)
     print(f"[{agent_id}] context: persona {len(agents_md)} chars, task {len(task)} chars, equity ${equity:,.2f}")
@@ -71,11 +97,30 @@ def run_agent(conn, agent_id, trigger="scheduled", dry=False):
 
     journal_op = next(o for o, v, _ in results if o.get("type") == "journal_entry" and v == "accepted")
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    title, body = journal_op.get("title", "run"), journal_op.get("body_markdown", "")
     if not dry:
-        commit_journal(agent_id, journal_op.get("title", "run"), journal_op.get("body_markdown", ""), date_str)
+        # The entry lands in Postgres BEFORE it is pushed to git. The operations
+        # above are already committed — the book has moved — so if the push then
+        # fails for good (a rejected non-fast-forward, a dead network), the
+        # explanation for those trades must still exist somewhere to be filed
+        # from. Without this the record simply loses the entry, since a crashed
+        # run is deliberately never re-fired. jobs/doctor.py reads these back
+        # and reports any that never reached the record.
+        conn.execute(
+            "update runs set meta = meta || %s::jsonb where id=%s",
+            (json.dumps({"journal": {"date": date_str, "title": title,
+                                     "body_markdown": body}}), run_id),
+        )
+        conn.commit()
+        commit_journal(agent_id, title, body, date_str)
+        # `meta - 'journal'`: the entry is in the record now, which is where
+        # published prose belongs — the Postgres copy was a lifeline for a push
+        # that failed, and a completed run does not need two copies. What is
+        # left behind is exactly the recoverable set doctor looks for.
         conn.execute(
             """update runs set status='completed', finished=now(), cost_usd=%s,
-               tokens_in=%s, tokens_out=%s, meta=%s where id=%s""",
+               tokens_in=%s, tokens_out=%s, meta=(meta - 'journal') || %s::jsonb
+               where id=%s""",
             (cost, usage.get("total_input_tokens"),
              usage.get("total_output_tokens", 0) + usage.get("total_thought_tokens", 0),
              json.dumps({"interaction_id": iid,

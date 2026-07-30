@@ -20,12 +20,11 @@ import os
 import pathlib
 
 from engine import observability as obs
-import subprocess
 import sys
 import traceback
 from datetime import datetime, timezone
 
-from engine import db, seating
+from engine import db, gitrepo, seating
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TRADER = pathlib.Path(os.environ.get("TRADER_REPO", "/Users/tomharamaty/trader"))
@@ -114,15 +113,9 @@ def commit_trader(paths, aid, today):
     if os.environ.get("GITHUB_ACTIONS") != "true":
         print(f"  local run — trader repo changes left uncommitted ({len(paths)} paths)")
         return
-    repo = str(TRADER)
-    subprocess.run(["git", "-C", repo, "add", "--"] + [str(p) for p in paths],
-                   check=True)
-    staged = subprocess.run(["git", "-C", repo, "diff", "--cached", "--quiet"])
-    if staged.returncode == 0:
-        return  # nothing new (resume path)
-    subprocess.run(["git", "-C", repo, "commit", "-q", "-m",
-                    f"seat({aid}): {today} chartered from interview"], check=True)
-    subprocess.run(["git", "-C", repo, "push", "-q"], check=True)
+    gitrepo.commit_and_push(
+        TRADER, paths, f"seat({aid}): {today} chartered from interview"
+    )
 
 
 def welcome_principal(conn, fs, aid, packet, uid):

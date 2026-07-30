@@ -19,12 +19,11 @@ Usage:
 """
 import os
 import pathlib
-import subprocess
 import sys
 import traceback
 from datetime import datetime, timezone
 
-from engine import db
+from engine import db, gitrepo
 from engine import observability as obs
 from jobs.ingest import fs_client
 
@@ -71,12 +70,7 @@ def commit(paths, message):
     if os.environ.get("GITHUB_ACTIONS") != "true" or not paths:
         print(f"  local run — {len(paths)} path(s) left uncommitted")
         return
-    repo = str(TRADER)
-    subprocess.run(["git", "-C", repo, "add", "--"] + [str(p) for p in paths], check=True)
-    if subprocess.run(["git", "-C", repo, "diff", "--cached", "--quiet"]).returncode == 0:
-        return
-    subprocess.run(["git", "-C", repo, "commit", "-q", "-m", message], check=True)
-    subprocess.run(["git", "-C", repo, "push", "-q"], check=True)
+    gitrepo.commit_and_push(TRADER, paths, message)
 
 
 def reject(doc, reason):

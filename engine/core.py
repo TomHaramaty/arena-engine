@@ -16,6 +16,9 @@ DRAWDOWN_TRIGGER = 0.07  # wake the brain when equity drops >7% from peak
 # sessions is a day and a half — long enough to be a stance, short enough that
 # the agent still remembers arguing for it.
 DORMANT_SESSIONS = 3
+# A drawdown that has already woken the brain must deepen by another full step
+# before it earns a second wake. See drawdown_wake.
+DRAWDOWN_STEP = DRAWDOWN_TRIGGER
 
 
 # ---------- pure functions ----------
@@ -607,6 +610,61 @@ def flag_dormancy(conn, agent_id, threshold=DORMANT_SESSIONS):
     return streak
 
 
+def drawdown_wake(last, equity, recovered):
+    """Does this breach of the drawdown line earn a wake?
+
+    `handled` on triggers_fired means "the brain has seen this", never "the
+    drawdown is over" — and no amount of deliberation puts equity back above
+    the peak. So the old guard (file unless an *unhandled* drawdown trigger
+    exists) released itself the moment the agent finished deliberating, and the
+    next tick filed the same breach again. Measured on the record 2026-07-30:
+    tempo and vertex each woke 13 times in one pre-market night against equity
+    frozen to seven decimal places, and each of those wakes wrote a journal
+    entry that can never be removed.
+
+    A breach earns a wake exactly twice: the first time it happens, and each
+    further step down. Everything between is the same fact the agent has
+    already argued about.
+
+    last: the most recent drawdown trigger's details {equity, peak}, or None.
+    recovered: has a mark since that trigger put equity back above the line it
+    was filed against — i.e. did that episode end?
+    """
+    if last is None or recovered:
+        return True
+    prev = last.get("equity")
+    if prev is None:          # a pre-2026-07-30 trigger carries no equity
+        return False          # treat the episode as open; the next leg re-asks
+    return equity <= float(prev) * (1 - DRAWDOWN_STEP)
+
+
+def drawdown_due(conn, agent_id, equity):
+    """drawdown_wake against live state. Reads the agent's last drawdown
+    trigger and asks whether equity has been back above that trigger's own
+    line since it was filed."""
+    last = conn.execute(
+        """select ts, details, handled from triggers_fired
+           where agent_id=%s and kind='drawdown' order by ts desc limit 1""",
+        (agent_id,),
+    ).fetchone()
+    if last is None:
+        return True
+    if not last["handled"]:
+        return False          # the last wake is still unread; never stack them
+    details = last["details"] or {}
+    peak = details.get("peak")
+    recovered = False
+    if peak is not None:
+        recovered = bool(
+            conn.execute(
+                """select 1 from equity_marks
+                   where agent_id=%s and ts>%s and equity >= %s limit 1""",
+                (agent_id, last["ts"], float(peak) * (1 - DRAWDOWN_TRIGGER)),
+            ).fetchone()
+        )
+    return drawdown_wake(details, equity, recovered)
+
+
 def mark_all(conn, quotes, now=None):
     """Mark every active agent's portfolio; update peak; detect drawdown
     triggers. Skips an agent if any of its position symbols lacks a fresh
@@ -644,23 +702,14 @@ def mark_all(conn, quotes, now=None):
             "update agent_state set peak_equity=%s where agent_id=%s",
             (peak, st["id"]),
         )
-        if equity < peak * (1 - DRAWDOWN_TRIGGER):
-            with conn.cursor() as cur:
-                cur.execute(
-                    """select 1 from triggers_fired
-                       where agent_id=%s and kind='drawdown' and not handled""",
-                    (st["id"],),
-                )
-                if not cur.fetchone():
-                    conn.execute(
-                        """insert into triggers_fired (agent_id, kind, details, ts)
-                           values (%s,'drawdown',%s,%s)""",
-                        (
-                            st["id"],
-                            json.dumps({"equity": equity, "peak": peak}),
-                            now,
-                        ),
-                    )
+        if equity < peak * (1 - DRAWDOWN_TRIGGER) and drawdown_due(
+            conn, st["id"], equity
+        ):
+            conn.execute(
+                """insert into triggers_fired (agent_id, kind, details, ts)
+                   values (%s,'drawdown',%s,%s)""",
+                (st["id"], json.dumps({"equity": equity, "peak": peak}), now),
+            )
         marked.append((st["id"], round(equity, 2), bidx))
     conn.commit()
     return marked, skipped

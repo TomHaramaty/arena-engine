@@ -140,6 +140,20 @@ def test_yesterdays_wakes_do_not_count_against_today():
     assert doctor.wake_loops([trig(ago_h=h) for h in range(25, 40)], NOW) == []
 
 
+def test_a_loop_that_has_stopped_is_no_longer_reported():
+    """The count survives 24 hours after a fix. Failing every tick over
+    something already dealt with is how a checker gets ignored — so a loop must
+    also be current to be a finding."""
+    stopped = [trig(ago_h=h) for h in range(6, 20)]     # nothing in 6 hours
+    assert doctor.wake_loops(stopped, NOW) == []
+
+
+def test_a_loop_still_firing_is_reported_with_how_recently():
+    live = [trig(ago_h=h) for h in range(1, 15)]
+    findings = doctor.wake_loops(live, NOW)
+    assert findings and "1.0h ago" in findings[0].detail
+
+
 def test_the_loop_is_found_per_agent_and_per_kind():
     triggers = ([trig("tempo", ago_h=h) for h in range(1, 8)]
                 + [trig("vertex", ago_h=h) for h in range(1, 9)]

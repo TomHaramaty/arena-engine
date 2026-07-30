@@ -43,6 +43,9 @@ STUCK_AFTER = timedelta(minutes=90)
 # condition re-firing on facts the agent has already seen — the drawdown loop,
 # and whatever the next one turns out to be.
 WAKES_PER_DAY_LIMIT = 4
+# ...and at least one of them this recently, or the loop is over and the count is
+# only history. The tick runs twice an hour, so a live loop always has one.
+LOOP_IS_LIVE_WITHIN = timedelta(hours=2)
 # A trigger nobody has acted on. The tick dispatches these every half hour.
 TRIGGER_STALE_AFTER = timedelta(hours=3)
 # Marks land on every tick that has quotes. Crypto quotes around the clock, so
@@ -81,17 +84,29 @@ def stranded_journals(runs):
 
 
 def wake_loops(triggers, now):
-    """The same agent woken over and over by the same kind of condition."""
-    day = now - timedelta(days=1)
-    counts = Counter(
-        (t["agent_id"], t["kind"]) for t in triggers if t["ts"] > day
-    )
+    """The same agent woken over and over by the same kind of condition.
+
+    Both halves matter: a day's worth of wakes, AND one of them recent. A loop
+    that has been fixed keeps its count for another 24 hours, and a checker that
+    goes on failing every tick over something already dealt with is how an
+    operator learns to ignore it. The question is whether this is happening now.
+    """
+    day, recent = now - timedelta(days=1), now - LOOP_IS_LIVE_WITHIN
+    counts, latest = Counter(), {}
+    for t in triggers:
+        if t["ts"] <= day:
+            continue
+        key = (t["agent_id"], t["kind"])
+        counts[key] += 1
+        latest[key] = max(latest.get(key, t["ts"]), t["ts"])
     return [
         Finding(ERROR, "wake-loop", f"{aid} · {kind}",
-                f"{n} {kind} triggers in 24h (limit {WAKES_PER_DAY_LIMIT}) — a "
-                f"condition is re-firing on facts already deliberated on; each "
-                f"one spends a brain run and appends to the record")
-        for (aid, kind), n in sorted(counts.items()) if n > WAKES_PER_DAY_LIMIT
+                f"{n} {kind} triggers in 24h (limit {WAKES_PER_DAY_LIMIT}), the "
+                f"last {_ago(now - latest[(aid, kind)])} ago — a condition is "
+                f"re-firing on facts already deliberated on; each one spends a "
+                f"brain run and appends to the record")
+        for (aid, kind), n in sorted(counts.items())
+        if n > WAKES_PER_DAY_LIMIT and latest[(aid, kind)] > recent
     ]
 
 

@@ -125,7 +125,21 @@ def commit_trader(paths, aid, today):
     subprocess.run(["git", "-C", repo, "push", "-q"], check=True)
 
 
-def process(conn, doc, today):
+def welcome_principal(conn, fs, aid, packet, uid):
+    """The founder's one letter, at the moment of seating — best-effort and
+    idempotent (jobs/welcome.py checks the letters archive). Sends only in CI,
+    the same gate commit_trader uses: a local ingest must never email a real
+    principal from a laptop. The seat is the product; the email is the
+    courtesy — send_welcome never raises."""
+    from jobs import welcome
+    display = str(packet.get("name") or aid).strip() if isinstance(packet, dict) else aid
+    updates = (packet.get("updates") if isinstance(packet, dict) else None) \
+        or seating.DEFAULT_UPDATES
+    welcome.send_welcome(conn, fs, aid, display, updates.get("cadence", "daily"),
+                         uid, send=os.environ.get("GITHUB_ACTIONS") == "true")
+
+
+def process(conn, fs, doc, today):
     from google.cloud import firestore
     data = doc.to_dict() or {}
     uid = str(data.get("uid") or "")
@@ -148,6 +162,8 @@ def process(conn, doc, today):
             doc.reference.update({"status": "seated", "agent_id": name,
                                   "seatedAt": firestore.SERVER_TIMESTAMP})
             print(f"  {doc.id}: resumed — {name} already seated")
+            # the run that half-finished may have died before the welcome went
+            welcome_principal(conn, fs, name, packet, uid)
             return
 
     cleaned, reasons = seating.validate_packet(
@@ -172,6 +188,7 @@ def process(conn, doc, today):
     tinct = (f"tincture № {pair['n']} {pair['name']}" if pair
              else "tincture pending minting (slate)")
     print(f"  {doc.id}: SEATED — {cleaned['id']} · {tinct}")
+    welcome_principal(conn, fs, cleaned["id"], cleaned, uid)
 
 
 def main():
@@ -197,7 +214,7 @@ def main():
     failures = 0
     for doc in docs:
         try:
-            process(conn, doc, today)
+            process(conn, fs, doc, today)
         except Exception:
             failures += 1
             conn.rollback()

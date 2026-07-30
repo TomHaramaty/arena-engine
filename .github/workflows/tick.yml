@@ -51,6 +51,8 @@ jobs:
           TRADER_REPO: ${{ github.workspace }}/trader
           GIT_SSH_COMMAND: ssh -i ~/.ssh/trader_key -o IdentitiesOnly=yes
           FIRESTORE_SERVICE_ACCOUNT: ${{ secrets.FIRESTORE_SERVICE_ACCOUNT }}
+          # the founder's welcome goes out at seating (jobs/welcome.py)
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: |
           printf '%s' "$FIRESTORE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/fs_sa.json"
           GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/fs_sa.json" python -m jobs.ingest

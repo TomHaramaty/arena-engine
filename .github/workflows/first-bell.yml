@@ -49,6 +49,8 @@ jobs:
           GIT_SSH_COMMAND: ssh -i ~/.ssh/trader_key -o IdentitiesOnly=yes
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/fs_sa.json
           APP_ID: ${{ github.event.client_payload.app_id }}
+          # the founder's welcome goes out at seating (jobs/welcome.py)
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: |
           python -m jobs.bell "$APP_ID" seating
           python -m jobs.ingest

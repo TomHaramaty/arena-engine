@@ -177,7 +177,7 @@ create table if not exists letters (
   id bigserial primary key,
   agent_id text not null references agents(id),
   day text not null,       -- the tape's own label, "Jul 28"
-  occasion text not null,  -- close | reflection
+  occasion text not null,  -- close | reflection | welcome
   decision text not null check (decision in ('sent','quiet','refused','failed','dry')),
   reason text,             -- why it went out, or why the trader stayed quiet
   subject text,

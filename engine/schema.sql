@@ -164,3 +164,30 @@ create table if not exists triggers_fired (
   ts timestamptz not null default now(),
   handled boolean not null default false
 );
+
+-- letters (2026-07-30): the record of what left the building. A letter is the
+-- one artifact of this arena that goes out to a person, and nothing here
+-- recorded that it had — the only traces were a line in a CI log and a row in
+-- a provider's dashboard that ages out. One row per trader per run, the quiet
+-- ones included: silence is a fact about the strategy, and a missing row
+-- cannot be told apart from a job that never ran. The principal's ADDRESS is
+-- deliberately absent — it belongs to them and lives in Firestore; the uid
+-- answers "who was written to" without republishing it. Append-only.
+create table if not exists letters (
+  id bigserial primary key,
+  agent_id text not null references agents(id),
+  day text not null,       -- the tape's own label, "Jul 28"
+  occasion text not null,  -- close | reflection
+  decision text not null check (decision in ('sent','quiet','refused','failed','dry')),
+  reason text,             -- why it went out, or why the trader stayed quiet
+  subject text,
+  owner_uid text,
+  provider_id text,        -- resend's message id: the receipt
+  html text,               -- exactly what was rendered, so it can be re-read
+  plain text,
+  bytes int,
+  error text,
+  created_at timestamptz not null default now()
+);
+create index if not exists letters_agent on letters(agent_id, created_at desc);
+create index if not exists letters_sent on letters(created_at desc) where decision = 'sent';

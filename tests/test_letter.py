@@ -478,3 +478,93 @@ def test_a_model_that_keeps_stating_numbers_loses_the_letter():
     with pytest.raises(ProseStatesQuantity):
         voice_pass(_p(), call=stubborn)
     assert len(attempts) > 1  # it tried again before giving up
+
+
+# ----------------------------------------------------- the record of the send
+
+from jobs.letter import (  # noqa: E402
+    DECISIONS,
+    LETTER_INSERT,
+    archive_row,
+    already_written,
+    out_name,
+)
+
+
+def test_every_column_has_a_value_to_go_in_it():
+    """The insert and the row are written in two places and must not drift."""
+    assert LETTER_INSERT.count("%s") == len(
+        archive_row("ballast", "Jul 28", "close", "quiet"))
+
+
+def test_an_unknown_decision_is_refused_rather_than_written():
+    with pytest.raises(ValueError):
+        archive_row("ballast", "Jul 28", "close", "posted")
+    assert set(DECISIONS) == {"sent", "quiet", "refused", "failed", "dry"}
+
+
+def test_a_quiet_trader_is_recorded_with_its_reason():
+    row = archive_row("ballast", "Jul 28", "close", "quiet",
+                      reason="nothing happened on the record today")
+    assert row[3] == "quiet" and "nothing happened" in row[4]
+
+
+def test_the_receipt_and_the_size_come_from_the_message():
+    row = archive_row("ballast", "Jul 28", "close", "sent", subject="s",
+                      owner_uid="uid1", provider_id="re_123", html="<p>hi</p>")
+    assert row[7] == "re_123"
+    assert row[10] == len("<p>hi</p>")
+
+
+def test_the_bytes_are_bytes_not_characters():
+    """A letter is measured against Gmail's clip threshold, which counts
+    bytes — and the house style is full of em dashes."""
+    assert archive_row("b", "Jul 28", "close", "sent", html="—")[10] == 3
+
+
+def test_nothing_written_becomes_null_not_an_empty_string():
+    row = archive_row("ballast", "Jul 28", "close", "failed", error="boom")
+    assert row[5] is None and row[8] is None and row[10] is None
+    assert row[11] == "boom"
+
+
+def test_the_principals_address_cannot_be_recorded_by_accident():
+    """It belongs to them and lives in Firestore. There is no parameter for it,
+    and there must not be one."""
+    with pytest.raises(TypeError):
+        archive_row("ballast", "Jul 28", "close", "sent", to="someone@example.com")
+
+
+class _Conn:
+    def __init__(self, found):
+        self.found, self.sql, self.params = found, "", ()
+
+    def execute(self, sql, params):
+        self.sql, self.params = sql, params
+        return self
+
+    def fetchone(self):
+        return {"?column?": 1} if self.found else None
+
+
+def test_a_letter_already_sent_today_is_not_sent_again():
+    """The daily-run's cron backup fires ten minutes behind the primary and
+    reaches this job too. Without the guard the principal gets two copies."""
+    conn = _Conn(found=True)
+    assert already_written(conn, "ballast", "Jul 28", "close") is True
+    assert conn.params == ("ballast", "Jul 28", "close")
+
+
+def test_the_guard_only_counts_letters_that_actually_went():
+    conn = _Conn(found=False)
+    already_written(conn, "ballast", "Jul 28", "close")
+    assert "decision = 'sent'" in conn.sql
+    assert "interval '1 day'" in conn.sql  # 'Jul 28' carries no year
+
+
+def test_a_quiet_row_does_not_block_tomorrows_letter():
+    assert already_written(_Conn(found=False), "ballast", "Jul 28", "close") is False
+
+
+def test_the_written_out_letter_is_named_for_the_day_and_the_trader():
+    assert out_name("ballast", "Jul 28") == "jul-28-ballast"

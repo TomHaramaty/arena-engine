@@ -541,6 +541,80 @@ def deliver(msg, api_key, post=None):
                 msg)
 
 
+# ----------------------------------------------------------------- the record
+
+#: What became of one trader's letter on one run. `quiet` and `refused` are
+#: recorded as deliberately as `sent`: a trader that stayed silent is a fact
+#: about its strategy, and an absent row cannot be told apart from a job that
+#: never ran.
+DECISIONS = ("sent", "quiet", "refused", "failed", "dry")
+
+LETTER_INSERT = (
+    "insert into letters (agent_id, day, occasion, decision, reason, subject, "
+    "owner_uid, provider_id, html, plain, bytes, error) "
+    "values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+)
+
+
+def archive_row(agent_id, day, occasion, decision, *, reason="", subject="",
+                owner_uid="", provider_id="", html="", plain="", error=""):
+    """The columns of one letter's record, in `LETTER_INSERT` order.
+
+    Pure, so the shape of what gets written is assertable without a database.
+    The principal's ADDRESS is not a parameter and cannot be recorded by
+    accident: it belongs to them, it lives in Firestore, and `owner_uid`
+    answers "who was written to" without copying it anywhere new.
+    """
+    if decision not in DECISIONS:
+        raise ValueError(f"unknown decision {decision!r}; expected one of {DECISIONS}")
+    return (agent_id, day, occasion, decision, reason or None, subject or None,
+            owner_uid or None, provider_id or None, html or None, plain or None,
+            len(html.encode("utf-8")) if html else None, error or None)
+
+
+def already_written(conn, agent_id, day, occasion):
+    """Has this trader's letter for this day already gone out?
+
+    The daily-run's cron backup fires ten minutes after the primary dispatch,
+    and both reach the letters step. The brains have their own already-ran
+    guard; letters had none, so the backup would have written a principal a
+    second copy of the same letter. The record is what makes the guard
+    possible — this is the row doing work, not just watching.
+
+    Bounded by a day rather than trusting the tape label alone: `day` is "Jul
+    28" and carries no year.
+    """
+    row = conn.execute(
+        "select 1 from letters where agent_id = %s and day = %s and occasion = %s "
+        "and decision = 'sent' and created_at > now() - interval '1 day' limit 1",
+        (agent_id, day, occasion),
+    ).fetchone()
+    return row is not None
+
+
+def out_name(agent_id, day):
+    """Filename stem for a written-out letter: 'jul-28-ballast'."""
+    return f"{day}-{agent_id}".replace(" ", "-").replace("/", "-").lower()
+
+
+def preview(dirpath, msg, agent_id, day):  # pragma: no cover - filesystem
+    """Drop the composed letter next to the run so it can be opened.
+
+    The dry run already builds the whole thing and then throws it away, which
+    made "look at it before it goes to a person" harder than it should be.
+    Both parts are written: the HTML is what most inboxes render, and the
+    plain-text alternative is what the rest of them do.
+    """
+    import os
+
+    stem = os.path.join(dirpath, out_name(agent_id, day))
+    with open(stem + ".html", "w", encoding="utf-8") as f:
+        f.write(msg["html"])
+    with open(stem + ".txt", "w", encoding="utf-8") as f:
+        f.write(msg["text"])
+    return stem + ".html"
+
+
 def main():  # pragma: no cover - orchestration, exercised end to end
     """Decide and send for every seated trader whose principal wants letters.
 
@@ -572,6 +646,8 @@ def main():  # pragma: no cover - orchestration, exercised end to end
     ap.add_argument("--send", action="store_true",
                     help="actually deliver; without it nothing leaves the machine")
     ap.add_argument("--only", help="restrict to one trader id — use when testing")
+    ap.add_argument("--out", help="write each composed letter to this directory "
+                                  "as .html and .txt — works with or without --send")
     args = ap.parse_args()
 
     # tlabel() in jobs/site.py stamps the tape "%b %d %H:%M", so the day
@@ -589,13 +665,32 @@ def main():  # pragma: no cover - orchestration, exercised end to end
 
     fs = fs_client()
     key = os.environ.get("RESEND_API_KEY", "")
+    occasion = "reflection" if args.reflection else "close"
+    if args.out:
+        os.makedirs(args.out, exist_ok=True)
     sent = quiet = failed = 0
 
-    with db.connect() as conn:
-        rows = conn.execute(
-            "select id, config, owner_uid from agents "
-            "where status='active' and owner_uid is not null order by id"
-        ).fetchall()
+    # Held for the whole loop, as jobs/agent_run.py holds one across a brain
+    # run: every outcome is committed the moment it is known, so a process that
+    # dies halfway still leaves behind the truth about the letters that went.
+    conn = db.connect()
+    db.migrate(conn)
+    rows = conn.execute(
+        "select id, config, owner_uid from agents "
+        "where status='active' and owner_uid is not null order by id"
+    ).fetchall()
+
+    def keep(agent_id, decision, **fields):
+        """Write one row. A failure here must never be mistaken for a failed
+        letter — the mail has already gone, and losing the record is the lesser
+        fault, but it is still a fault and it says so."""
+        try:
+            conn.execute(LETTER_INSERT,
+                         archive_row(agent_id, day, occasion, decision, **fields))
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            print(f"  {agent_id}: NOT RECORDED — {e}")
 
     if args.only:
         rows = [r for r in rows if r["id"] == args.only]
@@ -617,29 +712,50 @@ def main():  # pragma: no cover - orchestration, exercised end to end
             if not send:
                 quiet += 1
                 print(f"  {aid}: quiet — {why}")
+                keep(aid, "quiet", reason=why)
                 continue
+            # Before the model is called, because the duplicate this catches is
+            # the cron backup running ten minutes behind the primary, and a
+            # second voice pass would be paid for as well as unwanted.
+            if args.send and already_written(conn, aid, day, occasion):
+                quiet += 1
+                print(f"  {aid}: already written today — not sending a second copy")
+                continue  # no row: nothing happened, and the first one stands
             to = recipient(fs, row["owner_uid"])
             if not to:
                 quiet += 1
                 print(f"  {aid}: no address on file — not sending")
+                keep(aid, "quiet", reason="no address on file")
                 continue
             prose = voice_pass(p)  # the model writes connective prose only
             msg = envelope(p, prose, to)
+            written = preview(args.out, msg, aid, day) if args.out else ""
             if not args.send:
-                print(f"  {aid}: WOULD SEND to {to} — {why} — {len(msg['html'])} bytes")
+                print(f"  {aid}: WOULD SEND to {to} — {why} — {len(msg['html'])} bytes"
+                      + (f" — {written}" if written else ""))
+                keep(aid, "dry", reason=why, subject=msg["subject"],
+                     owner_uid=row["owner_uid"], html=msg["html"], plain=msg["text"])
                 continue
             status, body = deliver(msg, key)
             sent += 1
-            print(f"  {aid}: sent to {to} — {why} — {status} {body.get('id', '')}")
+            print(f"  {aid}: sent to {to} — {why} — {status} {body.get('id', '')}"
+                  + (f" — {written}" if written else ""))
+            keep(aid, "sent", reason=why, subject=msg["subject"],
+                 owner_uid=row["owner_uid"], provider_id=body.get("id", ""),
+                 html=msg["html"], plain=msg["text"])
         except ProseStatesQuantity as e:
             failed += 1
             print(f"  {aid}: REFUSED — {e}")
+            keep(aid, "refused", error=str(e))
         except Exception as e:  # one trader's failure never silences the rest
             failed += 1
             print(f"  {aid}: failed — {e}")
+            keep(aid, "failed", error=str(e))
 
+    conn.close()
     print(f"letters: {sent} sent, {quiet} quiet, {failed} failed"
-          + ("" if args.send else "  (dry — pass --send to deliver)"))
+          + ("" if args.send else "  (dry — pass --send to deliver)")
+          + (f"  (written to {args.out})" if args.out else ""))
     obs.heartbeat("letters", ok=failed == 0) if hasattr(obs, "heartbeat") else None
 
 

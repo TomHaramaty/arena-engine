@@ -88,6 +88,7 @@ jobs:
       # condition waking a brain in a loop. Those need a person. Everything else
       # prints and passes.
       - name: The arena checks itself
+        if: always()
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           TRADER_REPO: ${{ github.workspace }}/trader

@@ -26,7 +26,10 @@ REPO="${ARENA_WEB_REPO:-git@github.com:TomHaramaty/arena-web.git}"
 if [ -n "${ARENA_WEB_SSH_KEY:-}" ]; then
   KEY="$HOME/.ssh/arena_web_key"
   mkdir -p "$HOME/.ssh"
-  printf '%s' "$ARENA_WEB_SSH_KEY" > "$KEY"
+  # The trailing newline is load-bearing: without it OpenSSH refuses the key
+  # with `error in libcrypto`, which reads like a corrupt secret and is not one.
+  # (`printf '%s'` here cost one tick's publish on 2026-07-30.)
+  printf '%s\n' "$ARENA_WEB_SSH_KEY" > "$KEY"
   chmod 600 "$KEY"
   ssh-keyscan github.com >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
   export GIT_SSH_COMMAND="ssh -i $KEY -o IdentitiesOnly=yes"

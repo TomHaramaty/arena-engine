@@ -65,6 +65,80 @@ AGENTS = {
         "config": {"crypto_core_cap_pct": 0.50, "max_single_equity_pct": 0.20,
                    "class_caps": SLEEVE},
     },
+
+    # ------ house expansion, batch two (2026-07-30) ------------------------
+    # Ten distinct edges, chartered by the operator for an absolute-return
+    # sprint (rulings: aggressive spectrum, ten distinct strategies, honest
+    # benchmarks). Unlike the founding five these entries carry `bench` —
+    # jobs.sync_house_config births any of them missing from the DB, provided
+    # their prose already stands in the trader repo. Prose is the charter;
+    # this table is only the limits the engine enforces.
+    "drift": {
+        "name": "Drift", "archetype": "Post-earnings drift", "brain": "antigravity-gemini",
+        "config": {"max_single_pct": 0.30, "max_positions": 5, "class_caps": SLEEVE,
+                   "avatar": {"base": "stag", "color": 6, "costume": "professor", "acc": "rounds"}},
+        "bench": {"symbols": ["SPY"], "weights": [1.0]},
+    },
+    "rotor": {
+        "name": "Rotor", "archetype": "Sector rotation", "brain": "antigravity-gemini",
+        "config": {"max_single_pct": 0.35, "class_caps": SLEEVE,
+                   "avatar": {"base": "octopus", "color": 5, "costume": "gilet", "acc": "headset"}},
+        "bench": {"symbols": ["SPY"], "weights": [1.0]},
+    },
+    "gale": {
+        "name": "Gale", "archetype": "Volatility regime rider", "brain": "antigravity-gemini",
+        # The levered sleeve is this book's engine, not a hedge — 40% by charter.
+        "config": {"max_single_pct": 0.40, "class_caps": {"inverse_levered": 0.40},
+                   "avatar": {"base": "wolf", "color": 1, "costume": "pit", "acc": "aviators"}},
+        "bench": {"symbols": ["SPY"], "weights": [1.0]},
+    },
+    "copper": {
+        "name": "Copper", "archetype": "Macro trend follower", "brain": "antigravity-gemini",
+        "config": {"max_single_pct": 0.30, "cluster_cap_pct": 0.40, "class_caps": SLEEVE,
+                   "avatar": {"base": "ram", "color": 2, "costume": "banker", "acc": "tophat"}},
+        # The passive macro book it must beat: equal thirds metals · commodities · duration.
+        "bench": {"symbols": ["GLD", "DBC", "TLT"],
+                  "weights": [0.333334, 0.333333, 0.333333]},
+    },
+    "ember": {
+        "name": "Ember", "archetype": "Crypto trend discipline", "brain": "antigravity-gemini",
+        "config": {"max_single_pct": 0.25,
+                   "class_caps": {"crypto": 0.30, "inverse_levered": 0.15},
+                   "avatar": {"base": "frog", "color": 3, "costume": "hoodie", "acc": "visor"}},
+        "bench": {"symbols": ["BTC-USD"], "weights": [1.0]},
+    },
+    "shoal": {
+        "name": "Shoal", "archetype": "Small-cap catalyst", "brain": "antigravity-gemini",
+        "config": {"max_single_pct": 0.25, "cluster_cap_pct": 0.45, "class_caps": SLEEVE,
+                   "avatar": {"base": "hare", "color": 2, "costume": "gilet", "acc": "none"}},
+        "bench": {"symbols": ["IWM"], "weights": [1.0]},
+    },
+    "surge": {
+        "name": "Surge", "archetype": "High-beta momentum", "brain": "antigravity-gemini",
+        "config": {"max_single_pct": 0.25, "cluster_cap_pct": 0.45,
+                   "class_caps": {"crypto": 0.15, "inverse_levered": 0.15},
+                   "avatar": {"base": "cat", "color": 4, "costume": "hoodie", "acc": "headset"}},
+        "bench": {"symbols": ["QQQ"], "weights": [1.0]},
+    },
+    "talon": {
+        "name": "Talon", "archetype": "Breakdown hunter", "brain": "antigravity-gemini",
+        # The floor's first bearish book: the inverse sleeve is the hunting ground.
+        "config": {"max_single_pct": 0.30, "class_caps": {"inverse_levered": 0.40},
+                   "avatar": {"base": "hawk", "color": 0, "costume": "pit", "acc": "visor"}},
+        "bench": {"symbols": ["SPY"], "weights": [1.0]},
+    },
+    "forge": {
+        "name": "Forge", "archetype": "Semiconductor specialist", "brain": "antigravity-gemini",
+        "config": {"max_single_pct": 0.35, "class_caps": {"inverse_levered": 0.25},
+                   "avatar": {"base": "penguin", "color": 3, "costume": "suit", "acc": "rounds"}},
+        "bench": {"symbols": ["SMH"], "weights": [1.0]},
+    },
+    "tide": {
+        "name": "Tide", "archetype": "Quality mean reversion", "brain": "antigravity-gemini",
+        "config": {"max_single_pct": 0.30, "max_positions": 6, "class_caps": SLEEVE,
+                   "avatar": {"base": "bull", "color": 5, "costume": "suit", "acc": "monocle"}},
+        "bench": {"symbols": ["SPY"], "weights": [1.0]},
+    },
 }
 
 # Hard standing orders carried over from v1 principles (registered on the
@@ -98,6 +172,10 @@ def main():
                values (%s,%s,'seed') on conflict do nothing""", (sym, src))
 
     for aid, meta in AGENTS.items():
+        if "bench" in meta:
+            # Batch-two house agents have no v1 portfolio.json — they are born
+            # by jobs.sync_house_config, never by this migration.
+            continue
         pf = json.loads((repo / "agents" / aid / "portfolio.json").read_text())
         conn.execute(
             """insert into agents (id, name, archetype, brain, config)

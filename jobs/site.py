@@ -345,13 +345,12 @@ def build_agent(conn, row, prices):
     color = meta.get("color") or AVATAR_PALETTE[avatar["color"] % len(AVATAR_PALETTE)]
 
     # Who chartered it. A principal is named on the floor only if they asked to
-    # be (jobs/credit carries that choice into config); silence means anonymous,
-    # and an agent with no principal is the house's own.
+    # be (jobs/credit carries that choice into config); silence means anonymous.
+    # House agents show no byline at all (operator ruling 2026-07-30) — the same
+    # silence as a principal who declined credit, asserting nothing either way.
     credit = cfg.get("credit") if isinstance(cfg.get("credit"), dict) else {}
-    if not row["owner_uid"]:
-        chartered_by = "the house"
-    else:
-        chartered_by = str(credit.get("name") or "") if credit.get("show") else ""
+    chartered_by = (str(credit.get("name") or "") if credit.get("show") else "") \
+        if row["owner_uid"] else ""
 
     return {
         # `brain` is deliberately absent: which model runs a trader is an

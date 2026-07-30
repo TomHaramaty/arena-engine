@@ -81,14 +81,14 @@ jobs:
         env:
           ARENA_WEB_SSH_KEY: ${{ secrets.ARENA_WEB_SSH_KEY }}
         run: |
-          echo "$ARENA_WEB_SSH_KEY" > ~/.ssh/arena_web_key && chmod 600 ~/.ssh/arena_web_key
-          GIT_SSH_COMMAND="ssh -i ~/.ssh/arena_web_key -o IdentitiesOnly=yes" \
-            git clone -q --depth 1 git@github.com:TomHaramaty/arena-web.git webrepo
-          cp site/arena.json webrepo/data/arena.json
-          cd webrepo
-          git config user.name "arena-bot" && git config user.email "arena-bot@users.noreply.github.com"
-          git add data/arena.json
-          git diff --cached --quiet && echo "no data changes" || {
-            git commit -q -m "data: tick refresh"
-            GIT_SSH_COMMAND="ssh -i ~/.ssh/arena_web_key -o IdentitiesOnly=yes" git push -q
-          }
+          bash tools/publish_arena.sh "data: tick refresh"
+      # Last, so a finding can never stop the record being written or published.
+      # Exits non-zero only on an ERROR — a book that does not match its fills, a
+      # journal stranded by a failed push, an entry missing from the record, a
+      # condition waking a brain in a loop. Those need a person. Everything else
+      # prints and passes.
+      - name: The arena checks itself
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TRADER_REPO: ${{ github.workspace }}/trader
+        run: python -m jobs.doctor

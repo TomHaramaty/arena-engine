@@ -183,42 +183,34 @@ def candidates(fs, conn, now=None) -> list:
 # same strings, so the HTML and the plain text can never say different things.
 # The same law as the welcome. No numbers appear anywhere in this letter, so
 # there is nothing here for a quantity guard to catch.
+#
+# TWO PARAGRAPHS, AND THAT IS THE WHOLE LETTER. The first draft ran to four
+# and read as a page of text, which is the opposite of what it claims: a
+# letter that says 'a few minutes and you are done' cannot itself take a few
+# minutes to read. Every sentence here earns its place or it goes. The
+# resume-on-any-device promise was cut for that reason and lost nothing, since
+# clicking the link from wherever they are reading demonstrates it.
 
 GREETING = "Hi {first},"
 GREETING_ANON = "Hello,"
 
-FINISHED = ("you finished chartering {trader} and it is one step from the "
-            "floor. The last thing it needs is your countersign.")
+#: Where they stopped, and the fear that keeps them away, in one line: the
+#: reason people do not come back is that they assume the fifteen minutes are
+#: gone.
+FINISHED = "{trader} is chartered and saved. It is waiting on your countersign."
 
-STOPPED = ("you started chartering {trader} and put it down partway. It is "
-           "still exactly where you left it.")
+STOPPED = "{trader} is saved, exactly where you left it, minutes from done."
 
-#: The hook, and the beat this letter is really for. What is waiting on the
-#: other side of the click is not a form, it is a trader that runs without
-#: them: both bells, every market day, by their rules, with its reasoning
-#: written down where they can read it. Every clause here is true of every
-#: seated trader, so the letter promises nothing the floor does not do.
-AUTONOMY_FINISHED = (
-    "That takes a minute. After it, {trader} runs on its own: it takes its "
-    "seat at the next bell, trades by the rules you wrote, and writes down "
-    "its reasoning where you can read it."
-)
+#: The hook: what is on the other side of the click is not a form, it is a
+#: trader that runs without them. Every clause is true of every seated trader,
+#: so the letter cannot drift into promising a feature.
+AUTONOMY_FINISHED = ("That takes a minute. Then it takes its seat at the next "
+                     "bell and trades on its own, by the rules you wrote.")
 
-AUTONOMY_STOPPED = (
-    "A few more minutes finishes it. After that {trader} runs on its own: it "
-    "trades at both bells every market day, by the rules you set, and writes "
-    "down its reasoning where you can read it."
-)
+AUTONOMY_STOPPED = ("Finish it and it runs on its own: it trades at both "
+                    "bells, by the rules you set, and writes down why.")
 
-SAVED = ("Everything you said is saved. Nothing needs redoing: sign in on any "
-         "device and it opens on the question you stopped at.")
-
-SAVED_FINISHED = ("Everything you said is saved. Nothing needs redoing: sign "
-                  "in on any device, read it once more, and countersign.")
-
-ASK = ("If something got in the way, or the interview asked you for more than "
-       "it should have, write back and tell me. That is the most useful thing "
-       "you could send.")
+ASK = "If something got in the way, just reply and tell me."
 
 DISCLAIMER = ("Every fill is simulated: real prices, no real money, not "
               "investment advice.")
@@ -227,7 +219,7 @@ LINK = {ONE_STEP: "Countersign and finish", UNFINISHED: "Pick it up where you le
 
 SUBJECTS = {
     ONE_STEP: "{Trader} is one step from the floor",
-    UNFINISHED: "Your interview is still where you left it",
+    UNFINISHED: "{Trader} is minutes from done",
 }
 
 
@@ -241,18 +233,15 @@ def subject_of(occasion: str, trader: str) -> str:
 
 
 def _beats(occasion: str, first: str, trader: str) -> list:
-    """Greeting and where they stopped, then the hook, then the reassurance.
-
-    The hook sits second on purpose: the reason to come back is what the
-    trader does afterwards, and 'nothing was lost' only matters to someone who
-    has already decided to finish.
-    """
+    """Two paragraphs: where it stands and that it is safe, then what happens
+    after the click. In that order, because the reason to come back is the
+    trader that runs without them, and it is only worth reading once they know
+    their work is still there."""
     who = _trader(trader)
     finished = occasion == ONE_STEP
     opening = (FINISHED if finished else STOPPED).format(trader=who)
     return [(GREETING.format(first=first) if first else GREETING_ANON) + " " + opening,
-            (AUTONOMY_FINISHED if finished else AUTONOMY_STOPPED).format(trader=who),
-            SAVED_FINISHED if finished else SAVED]
+            (AUTONOMY_FINISHED if finished else AUTONOMY_STOPPED).format(trader=who)]
 
 
 def compose(occasion: str, first: str = "", trader: str = "") -> tuple:

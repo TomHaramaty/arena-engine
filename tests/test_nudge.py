@@ -271,7 +271,7 @@ def test_it_names_the_trader_when_the_interview_named_one():
 def test_an_unnamed_trader_is_never_given_a_name():
     subject, text = compose(UNFINISHED, "Peleg", "")
     assert "your trader" in text
-    assert subject == "Your interview is still where you left it"
+    assert subject == "Your trader is minutes from done"
 
 
 def test_the_finished_letter_asks_for_the_one_thing_missing():
@@ -282,38 +282,44 @@ def test_the_finished_letter_asks_for_the_one_thing_missing():
 
 def test_the_hook_is_what_happens_after_the_click_not_the_click():
     """The reason to come back is a trader that runs without them. Both
-    letters must say how little time is left and what it does afterwards,
-    and the hook comes before the reassurance that nothing was lost."""
-    for occasion, cost in ((ONE_STEP, "takes a minute"), (UNFINISHED, "A few more minutes")):
+    letters say how little is left, then that it runs by itself."""
+    for occasion, cost in ((ONE_STEP, "takes a minute"), (UNFINISHED, "minutes from done")):
         _, text = compose(occasion, "Ron", "Nexus")
         assert cost in text
-        assert "runs on its own" in text
-        assert text.index("runs on its own") < text.index("Nothing needs redoing")
+        assert "on its own" in text
 
 
 def test_the_hook_claims_only_what_every_seated_trader_does():
-    """Bells, the principal's own rules, and reasoning written down: true of
-    every trader on the floor, so the letter cannot be promising a feature."""
+    """Bells and the principal's own rules: true of every trader on the floor,
+    so the letter cannot be promising a feature."""
     for occasion in (ONE_STEP, UNFINISHED):
         _, text = compose(occasion, "Ron", "Nexus")
         assert "bell" in text
         assert "by the rules you" in text
-        assert "writes down its reasoning" in text
+
+
+def test_the_whole_letter_is_two_paragraphs():
+    """A letter that says 'a few minutes and you are done' may not itself
+    take a few minutes to read. The first draft ran to four paragraphs and
+    read as a page of text."""
+    for occasion in (ONE_STEP, UNFINISHED):
+        _, text = compose(occasion, "Ron", "Nexus")
+        body = text.split("    https://")[0].strip()
+        assert len(body.split("\n\n")) == 2, body
 
 
 def test_the_unfinished_letter_never_says_it_is_finished():
     _, text = compose(UNFINISHED, "Peleg", "")
     assert "countersign" not in text.lower()
-    assert "put it down partway" in text
+    assert "where you left it" in text
 
 
-def test_both_letters_promise_that_nothing_needs_redoing():
-    """The single most important sentence: the reason people do not come back
-    is that they assume the fifteen minutes are gone."""
+def test_both_letters_say_the_work_is_still_there_in_the_first_line():
+    """The reason people do not come back is that they assume the fifteen
+    minutes are gone, so 'saved' cannot wait until the second paragraph."""
     for occasion in (ONE_STEP, UNFINISHED):
         _, text = compose(occasion, "Ron", "Nexus")
-        assert "Nothing needs redoing" in text
-        assert "any device" in text
+        assert "saved" in text.split("\n\n")[0]
 
 
 def test_the_letter_goes_back_to_the_seat_not_the_desk():
@@ -325,13 +331,15 @@ def test_the_letter_goes_back_to_the_seat_not_the_desk():
 
 
 def test_it_asks_what_got_in_the_way():
+    """One line, because a paragraph asking for feedback is a paragraph
+    standing between them and the link."""
     _, text = compose(UNFINISHED, "Peleg", "")
-    assert "write back" in text and "most useful thing you could send." in text
+    assert "just reply and tell me" in text
 
 
 def test_no_greeting_at_all_beats_a_wrong_one():
     _, text = compose(ONE_STEP, "", "Nexus")
-    assert text.startswith("Hello, you finished")
+    assert text.startswith("Hello, Nexus is chartered")
 
 
 def test_the_letter_states_no_quantity_at_all():
@@ -351,7 +359,7 @@ def test_no_em_dashes_anywhere_in_the_copy():
 
 def test_it_stays_short():
     _, text = compose(ONE_STEP, "Ron", "A trader with the longest plausible name")
-    assert len(text.encode()) < 1200
+    assert len(text.encode()) < 700
 
 
 def test_an_unknown_occasion_is_refused_rather_than_composed():

@@ -280,6 +280,27 @@ def test_the_finished_letter_asks_for_the_one_thing_missing():
     assert "next bell" in text
 
 
+def test_the_hook_is_what_happens_after_the_click_not_the_click():
+    """The reason to come back is a trader that runs without them. Both
+    letters must say how little time is left and what it does afterwards,
+    and the hook comes before the reassurance that nothing was lost."""
+    for occasion, cost in ((ONE_STEP, "takes a minute"), (UNFINISHED, "A few more minutes")):
+        _, text = compose(occasion, "Ron", "Nexus")
+        assert cost in text
+        assert "runs on its own" in text
+        assert text.index("runs on its own") < text.index("Nothing needs redoing")
+
+
+def test_the_hook_claims_only_what_every_seated_trader_does():
+    """Bells, the principal's own rules, and reasoning written down: true of
+    every trader on the floor, so the letter cannot be promising a feature."""
+    for occasion in (ONE_STEP, UNFINISHED):
+        _, text = compose(occasion, "Ron", "Nexus")
+        assert "bell" in text
+        assert "by the rules you" in text
+        assert "writes down its reasoning" in text
+
+
 def test_the_unfinished_letter_never_says_it_is_finished():
     _, text = compose(UNFINISHED, "Peleg", "")
     assert "countersign" not in text.lower()

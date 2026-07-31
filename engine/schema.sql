@@ -191,3 +191,33 @@ create table if not exists letters (
 );
 create index if not exists letters_agent on letters(agent_id, created_at desc);
 create index if not exists letters_sent on letters(created_at desc) where decision = 'sent';
+
+-- nudges (2026-07-31): the letters archive above is keyed by trader, and the
+-- people this table is about are exactly the ones who never got a trader: an
+-- interview that was finished and never countersigned, or put down partway.
+-- So they cannot be recorded there (agent_id is not null and references
+-- agents), and they need their own row. Same discipline as letters: every
+-- outcome is written, the quiet ones included, and the address stays in
+-- Firestore where it belongs. Append-only.
+--
+-- The partial unique index is the once-ever guard itself rather than a note
+-- about one: a second delivered nudge for the same occasion cannot be written
+-- even if the code that checks first is wrong or two jobs run at once.
+create table if not exists nudges (
+  id bigserial primary key,
+  owner_uid text not null,
+  occasion text not null,  -- one-step | unfinished
+  decision text not null check (decision in ('sent','quiet','failed','dry')),
+  reason text,             -- why it went out, or why it did not
+  subject text,
+  trader text,             -- the name the interview had settled on, if any
+  provider_id text,        -- resend's message id: the receipt
+  html text,
+  plain text,
+  bytes int,
+  error text,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists nudges_once
+  on nudges(owner_uid, occasion) where decision = 'sent';
+create index if not exists nudges_recent on nudges(created_at desc);

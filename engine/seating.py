@@ -154,6 +154,31 @@ def _updates(u):
 # ---------- validation ----------
 
 
+def check_name(name, taken_ids):
+    """The one reason this name cannot be registered, or "" if it can.
+
+    Its own function because two callers need the SAME answer and neither may
+    guess it from prose: validate_packet puts it in front of the principal,
+    and jobs/ingest asks it again to mark a rejection as being about the name
+    alone. A name is the one thing a principal can change without touching a
+    word of their charter, so a rejection that is only about the name is
+    recoverable, and the client is told so in a field rather than by matching
+    on this sentence.
+    """
+    name = str(name or "").strip().lower()
+    if not NAME_RE.fullmatch(name):
+        return (f"The name '{name}' does not meet registry form: 3-12 "
+                "characters, lowercase letters, digits or hyphens, "
+                "beginning with a letter.")
+    if name in RESERVED:
+        return (f"The name '{name}' is reserved on this floor. Choose one the "
+                "registry does not already speak for.")
+    if name in (taken_ids or ()):
+        return (f"The name '{name}' is already registered. The floor does not "
+                "need an echo.")
+    return ""
+
+
 def validate_packet(packet, taken_ids, has_live_agent, listed_symbols, today=None):
     """→ (cleaned, reasons). Seat iff reasons == []. Reasons are written in the
     Registrar's voice — they go verbatim onto the rejected application doc.
@@ -166,16 +191,9 @@ def validate_packet(packet, taken_ids, has_live_agent, listed_symbols, today=Non
                       "not emit these; interview again."]
 
     name = str(packet.get("name") or "").strip().lower()
-    if not NAME_RE.fullmatch(name):
-        reasons.append(f"The name '{name}' does not meet registry form: 3-12 "
-                       "characters, lowercase letters, digits or hyphens, "
-                       "beginning with a letter.")
-    elif name in RESERVED:
-        reasons.append(f"The name '{name}' is reserved on this floor. Choose "
-                       "one the registry does not already speak for.")
-    elif name in taken_ids:
-        reasons.append(f"The name '{name}' is already registered. The floor "
-                       "does not need an echo.")
+    name_reason = check_name(name, taken_ids)
+    if name_reason:
+        reasons.append(name_reason)
 
     if has_live_agent:
         reasons.append("One live agent per principal. Your seat is occupied; "

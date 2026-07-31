@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 from engine import db
 from engine import observability as obs
+from engine import seating
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TRADER = pathlib.Path(os.environ.get("TRADER_REPO", "/Users/tomharamaty/trader"))
@@ -510,6 +511,13 @@ def main():
         "arena_curve": arena_curve(conn),
         "tape": tape_block(conn),
         "system": system_block(conn),
+        # Names the engine will refuse whatever else a packet says: house
+        # agents, registry words, and every ticker in the universe. Published
+        # so the interview can refuse one the moment it is proposed instead of
+        # letting a principal spend fifteen minutes on a charter that seating
+        # was always going to reject. The floor's own ids are already in
+        # `agents`, so they are deliberately not repeated here.
+        "reserved": sorted(seating.RESERVED),
     }
     site = ROOT / "site"
     site.mkdir(exist_ok=True)

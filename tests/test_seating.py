@@ -465,3 +465,39 @@ def test_nothing_the_engine_writes_into_a_charter_carries_an_em_dash(tmp_path):
             if line.startswith("#") or line.lower().startswith("- origin:"):
                 continue
             assert "—" not in line, f"{name}: {line}"
+
+
+# ---------------------------------------------------- the name, on its own
+#
+# A name is the one thing a principal can change without touching a word of
+# their charter, so seating asks about it in one place and two callers get the
+# same answer: the reason shown to the principal, and jobs/ingest deciding
+# whether a rejection is recoverable by rename alone.
+
+def test_a_free_name_has_no_reason_against_it():
+    assert seating.check_name("nexus", set()) == ""
+
+
+def test_a_taken_name_says_so_without_saying_anything_else():
+    why = seating.check_name("vector", {"vector"})
+    assert "already registered" in why
+    assert seating.check_name("vector", set()) == ""
+
+
+def test_reserved_words_and_tickers_are_refused():
+    for name in ("catalyst", "registrar", "spy", "nvda", "house"):
+        assert "reserved" in seating.check_name(name, set()), name
+
+
+def test_form_is_judged_before_availability():
+    """A malformed name is not 'taken': the principal is told the one thing
+    that is actually wrong with it."""
+    why = seating.check_name("X", {"x"})
+    assert "registry form" in why
+
+
+def test_the_packet_validator_uses_the_same_answer():
+    packet = dict(copy.deepcopy(PACKET), name="vector")
+    _, reasons = seating.validate_packet(packet, taken_ids={"vector"},
+                                         has_live_agent=False, listed_symbols=None)
+    assert seating.check_name("vector", {"vector"}) in reasons

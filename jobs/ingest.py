@@ -169,9 +169,17 @@ def process(conn, fs, doc, today):
         reasons.append("The application carries no principal. Sign in and "
                        "interview again.")
     if reasons:
+        # A name is the one thing a principal can change without touching a
+        # word of their charter, so a rejection that is ONLY about the name is
+        # recoverable: the seat offers a rename and resubmits the same packet.
+        # The client is told that in a field rather than by matching on the
+        # Registrar's prose, and only when nothing else is also wrong.
+        name_only = bool(seating.check_name(name, taken_ids(conn))) and len(reasons) == 1
         doc.reference.update({"status": "rejected", "reasons": reasons,
+                              "blocked": ["name"] if name_only else [],
                               "rejectedAt": firestore.SERVER_TIMESTAMP})
-        print(f"  {doc.id}: REJECTED — " + " | ".join(reasons))
+        print(f"  {doc.id}: REJECTED — " + " | ".join(reasons)
+              + ("  (the name alone; the principal can rename and resubmit)" if name_only else ""))
         return
 
     paths, pair = seat(conn, cleaned, uid, doc.id, today)

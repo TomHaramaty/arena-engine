@@ -28,9 +28,14 @@ THREE LAWS, all of them about not writing to the wrong person:
    the seat page replays it, and when it has not been chosen yet the letter
    simply does not name one.
 
-Like jobs/letter.py and jobs/welcome.py, this is the founder's channel and
-sending is opt-in: the CLI is dry by default, and the daily job passes --send
-only from CI. These are other people's inboxes.
+It comes from the house, NOT from the founder. The welcome is a personal note
+at the moment somebody joins and is signed by a person; this is the product
+telling them where their own unfinished work is, and a first name over it
+would be a sales signature. Replies still reach a human at hello@.
+
+Like jobs/letter.py and jobs/welcome.py, sending is opt-in: the CLI is dry by
+default, and the daily job passes --send only from CI. These are other
+people's inboxes.
 """
 
 from __future__ import annotations
@@ -44,7 +49,7 @@ from datetime import datetime, timezone
 from jobs.letter import C, MONO, SERIF, deliver, recipient
 
 SITE = "https://conviction-league.com"
-SENDER = "Tom · Conviction League <tom@conviction-league.com>"
+SENDER = "Conviction League <hello@conviction-league.com>"
 
 ONE_STEP = "one-step"
 UNFINISHED = "unfinished"
@@ -173,7 +178,7 @@ def candidates(fs, conn, now=None) -> list:
             print(f"  {uid}: no letter — {why}")
             continue
         out.append({"uid": uid, "occasion": occasion, "why": why,
-                    "trader": trader_name(draft)})
+                    "trader": trader_name(draft), "letters": wants_letters(data)})
     return out
 
 
@@ -202,15 +207,29 @@ FINISHED = "{trader} is chartered and saved. It is waiting on your countersign."
 STOPPED = "{trader} is saved, exactly where you left it, minutes from done."
 
 #: The hook: what is on the other side of the click is not a form, it is a
-#: trader that runs without them. Every clause is true of every seated trader,
-#: so the letter cannot drift into promising a feature.
-AUTONOMY_FINISHED = ("That takes a minute. Then it takes its seat at the next "
-                     "bell and trades on its own, by the rules you wrote.")
+#: trader that runs without them. Three verbs, because those are the three
+#: things it actually does: trades by their rules, revises those rules from
+#: what happens, and writes to them about it.
+AUTONOMY_FINISHED = ("That takes a minute. Then it runs on its own: it takes "
+                     "its seat at the next bell, trades by the rules you "
+                     "wrote, learns, and sends you updates.")
 
-AUTONOMY_STOPPED = ("Finish it and it runs on its own: it trades at both "
-                    "bells, by the rules you set, and writes down why.")
+AUTONOMY_STOPPED = ("Once you finish, it runs on its own: it trades by the "
+                    "rules you set, learns, and sends you updates.")
 
-ASK = "If something got in the way, just reply and tell me."
+#: A principal who chose cadence 'off' at the interview declined the trader's
+#: letters, so promising them updates would be a lie told to win a click. Same
+#: law as the welcome: the floor is public, so what is left is still true.
+AUTONOMY_FINISHED_QUIET = ("That takes a minute. Then it runs on its own: it "
+                           "takes its seat at the next bell, trades by the "
+                           "rules you wrote, learns, and everything it does "
+                           "shows on the floor.")
+
+AUTONOMY_STOPPED_QUIET = ("Once you finish, it runs on its own: it trades by "
+                          "the rules you set, learns, and everything it does "
+                          "shows on the floor.")
+
+ASK = "If something got in the way, just reply and tell us."
 
 DISCLAIMER = ("Every fill is simulated: real prices, no real money, not "
               "investment advice.")
@@ -232,7 +251,7 @@ def subject_of(occasion: str, trader: str) -> str:
     return line[0].upper() + line[1:]
 
 
-def _beats(occasion: str, first: str, trader: str) -> list:
+def _beats(occasion: str, first: str, trader: str, letters: bool = True) -> list:
     """Two paragraphs: where it stands and that it is safe, then what happens
     after the click. In that order, because the reason to come back is the
     trader that runs without them, and it is only worth reading once they know
@@ -240,32 +259,33 @@ def _beats(occasion: str, first: str, trader: str) -> list:
     who = _trader(trader)
     finished = occasion == ONE_STEP
     opening = (FINISHED if finished else STOPPED).format(trader=who)
+    hook = ((AUTONOMY_FINISHED if letters else AUTONOMY_FINISHED_QUIET) if finished
+            else (AUTONOMY_STOPPED if letters else AUTONOMY_STOPPED_QUIET))
     return [(GREETING.format(first=first) if first else GREETING_ANON) + " " + opening,
-            (AUTONOMY_FINISHED if finished else AUTONOMY_STOPPED).format(trader=who)]
+            hook.format(trader=who)]
 
 
-def compose(occasion: str, first: str = "", trader: str = "") -> tuple:
+def compose(occasion: str, first: str = "", trader: str = "", letters: bool = True) -> tuple:
     """Subject and plain-text body. Pure, so the copy is testable."""
     if occasion not in OCCASIONS:
         raise ValueError(f"unknown occasion {occasion!r}; expected one of {OCCASIONS}")
-    text = "\n\n".join(_beats(occasion, first, trader)
-                       + [f"    {SITE}/seat/", ASK, "Tom", DISCLAIMER])
+    text = "\n\n".join(_beats(occasion, first, trader, letters)
+                       + [f"    {SITE}/seat/", ASK, DISCLAIMER])
     return subject_of(occasion, trader), text + "\n"
 
 
-def render_html(occasion: str, first: str = "", trader: str = "") -> str:
+def render_html(occasion: str, first: str = "", trader: str = "", letters: bool = True) -> str:
     """The same words with a hierarchy, in the welcome's clothes: house paper,
     serif, one link, no images, no buttons. A person writing, not a funnel."""
     e = _html.escape
     para = (f'<p style="margin:0 0 18px;font:400 16px/1.65 {SERIF};'
             f'color:{C["ink"]};">{{}}</p>')
-    beats = "".join(para.format(e(b)) for b in _beats(occasion, first, trader))
+    beats = "".join(para.format(e(b)) for b in _beats(occasion, first, trader, letters))
     return f"""<div style="background:{C['mat']};padding:36px 16px;">
 <div style="max-width:560px;margin:0 auto;background:{C['card']};border:1px solid {C['rule']};padding:38px 42px 30px;">
 {beats}<p style="margin:0 0 26px;font:400 16px/1.65 {SERIF};">
 <a href="{SITE}/seat/" style="color:{C['brass']};text-decoration:underline;">{e(LINK[occasion])}</a></p>
 <p style="margin:0 0 26px;font:400 13.5px/1.7 {SERIF};color:{C['ink2']};">{e(ASK)}</p>
-<p style="margin:0 0 26px;font:400 16px/1.65 {SERIF};color:{C['ink']};">Tom</p>
 <div style="height:1px;background:{C['rule']};font-size:0;line-height:0;">&nbsp;</div>
 <p style="margin:14px 0 0;font:400 11.5px/1.7 {MONO};color:{C['muted']};">{e(DISCLAIMER)}</p>
 </div>
@@ -273,13 +293,22 @@ def render_html(occasion: str, first: str = "", trader: str = "") -> str:
 </div>"""
 
 
-def envelope(occasion: str, first: str, trader: str, to: str) -> dict:
+def envelope(occasion: str, first: str, trader: str, to: str, letters: bool = True) -> dict:
     """From the founder, no bulk-mail headers: this is a one-time message
     about something the recipient started, not a subscription. Replies go
     where they appear to go."""
-    subject, text = compose(occasion, first, trader)
+    subject, text = compose(occasion, first, trader, letters)
     return {"from": SENDER, "to": [to], "subject": subject,
-            "html": render_html(occasion, first, trader), "text": text}
+            "html": render_html(occasion, first, trader, letters), "text": text}
+
+
+def wants_letters(doc: dict) -> bool:
+    """Did this interview ask for the trader's letters? Only an explicit 'off'
+    is a no: the field is optional and its default is daily, so an interview
+    that never reached the updates card has not declined anything."""
+    updates = (doc or {}).get("updates")
+    cadence = (updates or {}).get("cadence") if isinstance(updates, dict) else ""
+    return str(cadence or "daily").strip().lower() != "off"
 
 
 def first_name(fs, uid: str) -> str:
@@ -332,8 +361,8 @@ def already_nudged(conn, uid, occasion) -> bool:
     return row is not None
 
 
-def send_nudge(conn, fs, uid, occasion, trader="", *, send=False, key="",
-               out=None, deliver_fn=deliver, again=False):
+def send_nudge(conn, fs, uid, occasion, trader="", *, letters=True, send=False,
+               key="", out=None, deliver_fn=deliver, again=False):
     """Write to one principal. Returns 'sent', 'dry', 'quiet', 'skipped' or
     'failed', and never raises: this job runs beside the record's own work and
     a letter must not be able to disturb it.
@@ -360,7 +389,7 @@ def send_nudge(conn, fs, uid, occasion, trader="", *, send=False, key="",
             print(f"  nudge {uid}: no address on file — not sending")
             keep("quiet", reason="no address on file")
             return "quiet"
-        msg = envelope(occasion, first_name(fs, uid), trader, to)
+        msg = envelope(occasion, first_name(fs, uid), trader, to, letters)
         if out:
             os.makedirs(out, exist_ok=True)
             stem = os.path.join(out, f"nudge-{occasion}-{uid[:8]}")
@@ -418,7 +447,7 @@ def main():  # pragma: no cover - orchestration, exercised end to end
         print(f"  {c['uid']}: {c['why']}"
               + (f" · {c['trader']}" if c["trader"] else " · unnamed"))
         got = send_nudge(conn, fs, c["uid"], c["occasion"], c["trader"],
-                         send=args.send, out=args.out,
+                         letters=c["letters"], send=args.send, out=args.out,
                          again=args.again and bool(args.only))
         outcomes[got] = outcomes.get(got, 0) + 1
     conn.close()

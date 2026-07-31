@@ -290,12 +290,33 @@ def test_the_hook_is_what_happens_after_the_click_not_the_click():
 
 
 def test_the_hook_claims_only_what_every_seated_trader_does():
-    """Bells and the principal's own rules: true of every trader on the floor,
-    so the letter cannot be promising a feature."""
+    """Trades by their rules, learns, writes to them: the three things a
+    seated trader actually does, so the letter cannot promise a feature."""
     for occasion in (ONE_STEP, UNFINISHED):
         _, text = compose(occasion, "Ron", "Nexus")
-        assert "bell" in text
         assert "by the rules you" in text
+        assert "learns" in text
+        assert "sends you updates" in text
+
+
+def test_a_principal_who_declined_letters_is_not_promised_letters():
+    """Cadence 'off' at the interview declined the trader's letters. Promising
+    them anyway would be a lie told to win a click. The floor is public, so
+    what is left in the sentence is still true."""
+    for occasion in (ONE_STEP, UNFINISHED):
+        _, text = compose(occasion, "Ron", "Nexus", letters=False)
+        assert "sends you updates" not in text
+        assert "shows on the floor" in text
+        assert "learns" in text
+
+
+def test_only_an_explicit_off_counts_as_declining():
+    """The updates card sits late on the review screen, so an interview that
+    never reached it has not declined anything."""
+    assert nudge.wants_letters({}) is True
+    assert nudge.wants_letters({"updates": {}}) is True
+    assert nudge.wants_letters({"updates": {"cadence": "weekly"}}) is True
+    assert nudge.wants_letters({"updates": {"cadence": "OFF"}}) is False
 
 
 def test_the_whole_letter_is_two_paragraphs():
@@ -334,7 +355,7 @@ def test_it_asks_what_got_in_the_way():
     """One line, because a paragraph asking for feedback is a paragraph
     standing between them and the link."""
     _, text = compose(UNFINISHED, "Peleg", "")
-    assert "just reply and tell me" in text
+    assert "just reply and tell us" in text
 
 
 def test_no_greeting_at_all_beats_a_wrong_one():
@@ -369,9 +390,19 @@ def test_an_unknown_occasion_is_refused_rather_than_composed():
 
 # ---------------------------------------------------------------- the envelope
 
-def test_it_comes_from_the_founder_and_carries_no_bulk_headers():
+def test_it_comes_from_the_house_not_the_founder():
+    """The welcome is a personal note and is signed by a person. This one
+    tells somebody where their own unfinished work is, so a first name over it
+    would read as a sales signature."""
     msg = envelope(ONE_STEP, "Ron", "Nexus", "p@example.com")
-    assert msg["from"] == nudge.SENDER and "tom@conviction-league.com" in msg["from"]
+    assert msg["from"] == "Conviction League <hello@conviction-league.com>"
+    assert "tom@" not in msg["from"]
+    assert not msg["text"].strip().endswith("Tom")
+    assert "\nTom\n" not in msg["text"] and ">Tom<" not in msg["html"]
+
+
+def test_it_carries_no_bulk_headers_and_names_one_recipient():
+    msg = envelope(ONE_STEP, "Ron", "Nexus", "p@example.com")
     assert msg["to"] == ["p@example.com"]
     assert "headers" not in msg
 

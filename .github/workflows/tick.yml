@@ -38,14 +38,26 @@ jobs:
             git clone -q --branch claude/arena git@github.com:TomHaramaty/trader-arena.git trader
           git -C trader config user.name "arena-bot"
           git -C trader config user.email "arena-bot@users.noreply.github.com"
+      # A brain is the one thing in this workflow that runs on somebody else's
+      # machine, and on 2026-07-31 it refused us for three hours: the managed
+      # agent answered 403 to every session. Because this step had no guard,
+      # each failure also skipped everything below it — new principals went
+      # unseated, the floor froze mid-afternoon, and the record had to be
+      # published by hand. Twice. A model outage must cost the arena its
+      # sessions and nothing else, so the wake is allowed to fail on its own.
       - name: Wake triggered agents
+        continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TRADER_REPO: ${{ github.workspace }}/trader
           GIT_SSH_COMMAND: ssh -i ~/.ssh/trader_key -o IdentitiesOnly=yes
         run: python -m jobs.dispatch --triggers-only
+      # Everything from here writes or publishes the record, so each one runs
+      # whatever happened above it. `if: always()` and not `success()`: these
+      # steps are the point of the tick.
       - name: Ingest seat applications
+        if: always()
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           TRADER_REPO: ${{ github.workspace }}/trader
@@ -57,6 +69,7 @@ jobs:
           printf '%s' "$FIRESTORE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/fs_sa.json"
           GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/fs_sa.json" python -m jobs.ingest
       - name: Sync who is named on the floor
+        if: always()
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           FIRESTORE_SERVICE_ACCOUNT: ${{ secrets.FIRESTORE_SERVICE_ACCOUNT }}
@@ -64,6 +77,7 @@ jobs:
           printf '%s' "$FIRESTORE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/fs_sa.json"
           GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/fs_sa.json" python -m jobs.credit
       - name: Take guidance from the desks
+        if: always()
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           TRADER_REPO: ${{ github.workspace }}/trader
@@ -73,11 +87,13 @@ jobs:
           printf '%s' "$FIRESTORE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/fs_sa.json"
           GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/fs_sa.json" python -m jobs.guidance
       - name: Build arena.json
+        if: always()
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           TRADER_REPO: ${{ github.workspace }}/trader
         run: python -m jobs.site
       - name: Push data to arena-web
+        if: always()
         env:
           ARENA_WEB_SSH_KEY: ${{ secrets.ARENA_WEB_SSH_KEY }}
         run: |

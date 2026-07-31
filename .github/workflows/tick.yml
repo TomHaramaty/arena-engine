@@ -44,9 +44,12 @@ jobs:
       # each failure also skipped everything below it — new principals went
       # unseated, the floor froze mid-afternoon, and the record had to be
       # published by hand. Twice. A model outage must cost the arena its
-      # sessions and nothing else, so the wake is allowed to fail on its own.
+      # sessions and nothing else, so every step below runs whatever happens
+      # here. NOT continue-on-error: that displays a genuinely failed step as
+      # green in the API and the UI, which is how an outage becomes invisible.
+      # The wake stays red, the tick's conclusion stays red, and the record is
+      # written and published anyway.
       - name: Wake triggered agents
-        continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

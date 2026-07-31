@@ -562,3 +562,53 @@ def test_a_granted_symbol_still_answers_to_the_class_caps():
     _, verdict, reason = only(apply(c, agent(max_single_pct=0.25),
                                     buy(symbol="SOL-USD", notional=10_000)))
     assert verdict == "rejected" and "crypto cap 0%" in reason
+
+
+# --------------------------------------------------- reading the operations
+#
+# The parser used to read only the LAST fenced json block. A real session on
+# 2026-07-31 emitted a second fence after its operations and died on a
+# JSONDecodeError with the operations sitting intact in the block above.
+
+JOURNAL = '{"operations": [{"type": "journal_entry", "title": "t", "body_markdown": "b"}]}'
+
+
+def test_it_reads_the_operations_block():
+    assert ops.parse(f"words\n```json\n{JOURNAL}\n```\n")[0]["type"] == "journal_entry"
+
+
+def test_a_later_broken_fence_does_not_bury_the_operations():
+    """The production failure, as a test."""
+    text = f"```json\n{JOURNAL}\n```\nand then\n```json\n{{\"note\": ...}}\n```\n"
+    assert ops.parse(text)[0]["type"] == "journal_entry"
+
+
+def test_a_later_valid_block_without_operations_is_skipped():
+    text = f"```json\n{JOURNAL}\n```\n```json\n{{\"summary\": \"done\"}}\n```"
+    assert ops.parse(text)[0]["type"] == "journal_entry"
+
+
+def test_the_newest_operations_block_wins():
+    """Two real op blocks means the session changed its mind; the last word
+    stands, exactly as before."""
+    first = '{"operations": [{"type": "journal_entry", "title": "old", "body_markdown": "b"}]}'
+    text = f"```json\n{first}\n```\n```json\n{JOURNAL}\n```"
+    assert ops.parse(text)[0]["title"] == "t"
+
+
+def test_a_single_malformed_block_still_fails_the_session():
+    """Tolerating shapes is not the same as guessing at content: a block that
+    looks like operations but does not parse fails the session, and says so."""
+    with pytest.raises(ops.OpsParseError, match="not valid json"):
+        ops.parse('```json\n{"operations": [oops]}\n```')
+
+
+def test_a_truncated_block_never_even_looks_like_one():
+    """No closing brace, no match: the session fails as it should."""
+    with pytest.raises(ops.OpsParseError, match="no fenced json"):
+        ops.parse('```json\n{"operations": [\n```')
+
+
+def test_no_block_at_all_still_fails():
+    with pytest.raises(ops.OpsParseError, match="no fenced json"):
+        ops.parse("I have decided to hold.")

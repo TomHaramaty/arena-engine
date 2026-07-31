@@ -11,13 +11,38 @@ class OpsParseError(Exception):
 
 
 def parse(text):
+    """The operations a session decided on, from the last fenced block that
+    actually carries them.
+
+    It used to read `blocks[-1]` and nothing else. That was safe against the
+    managed agent, whose output shape was stable; against a model it is not —
+    a session on 2026-07-31 emitted a second fence after its operations and
+    the whole run died on a JSONDecodeError with the real operations sitting
+    intact in the block above. Now every candidate is tried, newest first.
+
+    This cannot invent anything: a block is only accepted if it parses AND
+    carries a non-empty `operations` list. A truncated or malformed block is
+    still a failed session, which is the honest outcome.
+    """
     blocks = re.findall(r"```json\s*(\{.*?\})\s*```", text, re.S)
     if not blocks:
         raise OpsParseError("no fenced json operations block in output")
-    data = json.loads(blocks[-1])
-    ops = data.get("operations")
-    if not isinstance(ops, list) or not ops:
-        raise OpsParseError("operations key missing or empty")
+    ops, last_error = None, None
+    for block in reversed(blocks):
+        try:
+            data = json.loads(block)
+        except json.JSONDecodeError as e:
+            last_error = e
+            continue
+        candidate = data.get("operations") if isinstance(data, dict) else None
+        if isinstance(candidate, list) and candidate:
+            ops = candidate
+            break
+    if ops is None:
+        if last_error and len(blocks) == 1:
+            raise OpsParseError(f"the operations block is not valid json: {last_error}")
+        raise OpsParseError(
+            f"none of the {len(blocks)} fenced json block(s) carried operations")
     n_journal = sum(1 for o in ops if o.get("type") == "journal_entry")
     if n_journal != 1:
         raise OpsParseError(f"expected exactly 1 journal_entry, got {n_journal}")

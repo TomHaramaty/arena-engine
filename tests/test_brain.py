@@ -135,3 +135,52 @@ def test_a_completed_interaction_with_no_text_is_a_failure(monkeypatch):
                                        "steps": []})])
     with pytest.raises(brain.BrainError, match="no model_output"):
         brain.run("persona", "task")
+
+
+# ------------------------------------------------- what is actually asked for
+#
+# The arena moved from a sandboxed managed agent to a model on 2026-07-31, when
+# the agent began refusing this project. The protocol did not change; the body
+# did. These hold the two shapes apart, because the difference between them is
+# the difference between a brain that can research and one that quietly cannot.
+
+def test_the_model_carries_the_rulebook_as_its_system_instruction():
+    body = brain.request_body("# Ballast\nNever short.", "Today's task")
+    assert body["model"] == brain.MODEL
+    assert body["system_instruction"] == "# Ballast\nNever short."
+    assert body["input"] == [{"type": "text", "text": "Today's task"}]
+    assert "agent" not in body and "environment" not in body
+
+
+def test_the_model_is_handed_search_by_name():
+    """runner/context.py tells every brain to 'Research with google_search'.
+    The agent brought its own web access; a model has to be given it, or the
+    charter's research promise quietly stops being kept."""
+    body = brain.request_body("persona", "task")
+    assert body["tools"] == [{"type": "google_search"}]
+
+
+def test_the_sandbox_path_is_still_reachable(monkeypatch):
+    """The entitlement may come back, and the sandbox is richer. BRAIN_AGENT
+    puts the mounted rulebook and the remote environment back."""
+    monkeypatch.setattr(brain, "AGENT", "antigravity-preview-05-2026")
+    body = brain.request_body("# Ballast", "task")
+    assert body["agent"] == "antigravity-preview-05-2026"
+    assert body["environment"]["sources"][0]["target"] == ".agents/AGENTS.md"
+    assert body["environment"]["sources"][0]["content"] == "# Ballast"
+    assert "model" not in body and "system_instruction" not in body
+
+
+def test_every_offered_model_has_a_price():
+    """A model swap that forgets its rates makes the recorded spend lie."""
+    for name, (rin, rout) in brain.RATES.items():
+        assert rin > 0 and rout > rin, name
+    assert (brain.RATE_IN, brain.RATE_OUT) == brain.RATES[brain.MODEL]
+
+
+def test_thought_tokens_are_billed_as_output():
+    """They are the expensive half of a deliberation and must not vanish from
+    the arena's own cost figures."""
+    cost = brain.cost_usd({"total_input_tokens": 1_000_000,
+                           "total_output_tokens": 0, "total_thought_tokens": 1_000_000})
+    assert cost == round(brain.RATE_IN * 1e6 + brain.RATE_OUT * 1e6, 4)

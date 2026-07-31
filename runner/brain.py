@@ -1,15 +1,62 @@
-"""Antigravity (Gemini managed agent) brain client — raw REST, no SDK."""
+"""Gemini Interactions API brain client — raw REST, no SDK.
+
+TWO TARGETS, ONE PROTOCOL. The Interactions API can address either a managed
+agent (which brings a sandboxed Linux environment with tools and file mounts)
+or a model directly. Everything else — starting an interaction, polling it,
+reading `model_output`, the usage block — is identical, which is why the
+switch below is four lines rather than a rewrite.
+
+The arena ran on the managed agent `antigravity-preview-05-2026` from launch
+until 2026-07-31 14:03 UTC, when starting an interaction with it began
+returning 403 "The caller does not have permission" for this project. Measured
+that day, in this order, because each probe rules something out:
+
+  - the same key answers generateContent 200            (the credential lives)
+  - a fresh key from a SECOND Google account: same 403  (not the credential)
+  - a model-targeted interaction, same key: 200         (not the API, not us)
+
+So the model path is the one that works, and it is now the default. The agent
+path is kept behind BRAIN_AGENT because the sandbox is genuinely richer and
+the entitlement may come back: set it to the agent name to go back.
+
+WHAT MOVED. The agent read its rulebook from a mounted `.agents/AGENTS.md`;
+a model reads the same text as its system instruction. The agent brought its
+own web access; the model is handed `google_search` explicitly, because
+runner/context.py tells every brain to "Research with google_search" and a
+brain that cannot search would quietly stop doing the research its charter
+promises. What is NOT replaced: code execution and file management. No part
+of a session used them — a brain deliberates and emits typed operations as
+text — but a future prompt must not assume them.
+"""
 import os
 import time
 
 import requests
 
 BASE = "https://generativelanguage.googleapis.com/v1beta"
-AGENT = "antigravity-preview-05-2026"
-# Paid-tier rates for the Antigravity agent tier above, USD per token —
-# these feed the public "brain spend" figures; update them if AGENT changes.
-RATE_IN = 1.50 / 1e6
-RATE_OUT = 7.50 / 1e6
+
+#: Set to a managed agent name (e.g. "antigravity-preview-05-2026") to run
+#: sessions in a sandbox again. Empty means the model path below.
+AGENT = os.environ.get("BRAIN_AGENT", "")
+
+#: The model behind every brain. gemini-3.6-flash is priced at exactly the
+#: rates the Antigravity agent tier was billed at ($1.50 / $7.50 per 1M), which
+#: is the best evidence available that it is the same class of model the agent
+#: was running underneath: the arena's recorded spend stays comparable across
+#: the change rather than silently re-basing. BRAIN_MODEL overrides it without
+#: a deploy.
+MODEL = os.environ.get("BRAIN_MODEL", "gemini-3.6-flash")
+
+#: Paid-tier rates, USD per token, per model. These feed the recorded brain
+#: spend, so a model change that forgets its rates makes the record lie.
+#: Thought tokens bill as output (see cost_usd).
+RATES = {
+    "gemini-3.6-flash": (1.50 / 1e6, 7.50 / 1e6),
+    "gemini-3.5-flash": (1.50 / 1e6, 9.00 / 1e6),
+    "gemini-3.1-pro-preview": (2.00 / 1e6, 12.00 / 1e6),
+    "gemini-2.5-pro": (1.25 / 1e6, 10.00 / 1e6),
+}
+RATE_IN, RATE_OUT = RATES.get(MODEL, (1.50 / 1e6, 7.50 / 1e6))
 
 
 class BrainError(Exception):
@@ -85,20 +132,37 @@ def _post_interaction(body, timeout_s, attempts=3):
     raise BrainError(f"could not start interaction after {attempts} attempts: {last}")
 
 
-def run(agents_md, task, timeout_s=900):
-    """One interaction in a fresh sandbox with AGENTS.md mounted.
-    Returns (text, usage, interaction_id)."""
-    body = {
-        "agent": AGENT,
+def request_body(agents_md, task):
+    """The interaction to start: a model carrying the rulebook as its system
+    instruction, or the managed agent with the rulebook mounted as a file.
+
+    Pure, so the shape of what is asked can be asserted without a network.
+    """
+    if AGENT:
+        return {
+            "agent": AGENT,
+            "input": [{"type": "text", "text": task}],
+            "environment": {
+                "type": "remote",
+                "sources": [
+                    {"type": "inline", "target": ".agents/AGENTS.md", "content": agents_md}
+                ],
+            },
+        }
+    return {
+        "model": MODEL,
+        # the same words the agent read off a mounted file
+        "system_instruction": agents_md,
         "input": [{"type": "text", "text": task}],
-        "environment": {
-            "type": "remote",
-            "sources": [
-                {"type": "inline", "target": ".agents/AGENTS.md", "content": agents_md}
-            ],
-        },
+        # the sandbox's web access, asked for by name
+        "tools": [{"type": "google_search"}],
     }
-    d = _post_interaction(body, timeout_s)
+
+
+def run(agents_md, task, timeout_s=900):
+    """One interaction carrying this agent's rulebook and today's task.
+    Returns (text, usage, interaction_id)."""
+    d = _post_interaction(request_body(agents_md, task), timeout_s)
     deadline = time.time() + timeout_s
     misses = 0
     while d.get("status") in ("in_progress", "queued", "running"):

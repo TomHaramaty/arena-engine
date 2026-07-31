@@ -137,3 +137,59 @@ def test_a_completed_run_does_not_keep_two_copies_of_its_entry(arena, monkeypatc
     assert c.runs[0]["status"] == "completed"
     assert "journal" not in c.runs[0]["meta"]
     assert c.runs[0]["meta"]["interaction_id"] == "i-1"
+
+
+# ------------------------------------------------- asking again for the block
+#
+# 2026-07-31: a real principal's trader lost its first session twice to an
+# operations block that would not parse, and parsed perfectly the next time it
+# was asked. At that point in a session nothing has been applied and nothing
+# journalled, which is the same state in which brain.py already retries.
+
+GOOD = '```json\n{"operations": [{"type": "journal_entry", "title": "t", "body_markdown": "b"}]}\n```'
+BAD = '```json\n{"operations": [oops]}\n```'
+USAGE = {"total_input_tokens": 100, "total_output_tokens": 10, "total_thought_tokens": 5}
+
+
+def replies(*texts):
+    """A brain that answers with each text in turn, counting its calls."""
+    calls = []
+
+    def run(agents_md, task):
+        calls.append(task)
+        return texts[len(calls) - 1], USAGE, f"i{len(calls)}"
+    return run, calls
+
+
+def test_a_readable_block_is_asked_for_once():
+    run, calls = replies(GOOD)
+    parsed, spent, cost = agent_run._deliberate("ballast", "persona", "task", run=run)
+    assert parsed[0]["type"] == "journal_entry"
+    assert len(calls) == 1
+    assert spent["interaction_id"] == "i1"
+
+
+def test_an_unreadable_block_is_asked_again():
+    run, calls = replies(BAD, GOOD)
+    parsed, spent, cost = agent_run._deliberate("ballast", "persona", "task", run=run)
+    assert parsed[0]["title"] == "t"
+    assert len(calls) == 2
+    assert calls[0] == calls[1], "the same question, not a repaired one"
+    assert spent["interaction_id"] == "i2", "the interaction that was actually read"
+
+
+def test_both_attempts_are_paid_for_and_counted():
+    """A retried session spent two interactions; the record must say so."""
+    run, _ = replies(BAD, GOOD)
+    _, spent, cost = agent_run._deliberate("ballast", "persona", "task", run=run)
+    assert spent["in"] == 200
+    assert spent["out"] == 30
+    assert cost == round(2 * brain.cost_usd(USAGE), 4)
+
+
+def test_a_brain_that_cannot_be_read_twice_fails_the_session():
+    """Retrying a flake is not the same as papering over a broken brain."""
+    run, calls = replies(BAD, BAD)
+    with pytest.raises(ops.OpsParseError):
+        agent_run._deliberate("ballast", "persona", "task", run=run)
+    assert len(calls) == agent_run.DELIBERATION_ATTEMPTS

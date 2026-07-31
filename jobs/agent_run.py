@@ -70,18 +70,60 @@ def run_agent(conn, agent_id, trigger="scheduled", dry=False):
         raise
 
 
+#: How many times a session may be asked for its operations. Two, not more:
+#: this exists for a formatting flake, and a brain that cannot produce a
+#: readable block twice is telling us something we should not paper over.
+DELIBERATION_ATTEMPTS = 2
+
+
+def _deliberate(agent_id, agents_md, task, run=None, parse=None):
+    """Run the brain until its operations can actually be read. Returns
+    (operations, tokens, total_cost_usd), where tokens are summed across every
+    attempt and carry the id of the interaction that was finally read.
+
+    An unreadable operations block used to kill the session outright. That was
+    right when nothing could be said about what the brain had done; but at
+    THIS point nothing has been applied, nothing has been journalled, and the
+    run row holds no decisions — the same state in which brain.py already
+    retries a refused POST, and for the same reason: asking the question again
+    is not repairing an answer. It cost a real principal their trader's first
+    session on 2026-07-31, twice, on a block that parsed perfectly the next
+    time it was asked.
+
+    Every attempt's tokens are paid for and counted, so the recorded spend
+    stays true. A brain that cannot emit a readable block twice raises, and
+    the session fails as it always did.
+    """
+    run = run or brain.run
+    parse = parse or ops.parse
+    cost, tokens_in, tokens_out = 0.0, 0, 0
+    for attempt in range(1, DELIBERATION_ATTEMPTS + 1):
+        text, usage, iid = run(agents_md, task)
+        cost += brain.cost_usd(usage)
+        tokens_in += usage.get("total_input_tokens", 0)
+        tokens_out += (usage.get("total_output_tokens", 0)
+                       + usage.get("total_thought_tokens", 0))
+        print(f"[{agent_id}] interaction {iid} — in {usage.get('total_input_tokens')} / "
+              f"out {usage.get('total_output_tokens')} / thought {usage.get('total_thought_tokens')} "
+              f"→ ${round(cost, 4)}")
+        try:
+            return (parse(text),
+                    {"in": tokens_in, "out": tokens_out, "interaction_id": iid},
+                    round(cost, 4))
+        except ops.OpsParseError as e:
+            if attempt == DELIBERATION_ATTEMPTS:
+                raise
+            print(f"[{agent_id}] the operations block could not be read ({e}). "
+                  "Nothing has been applied; asking again.")
+    raise AssertionError("unreachable")
+
+
 def _session(conn, agent, agent_id, run_id, dry):
     agents_md = context.build_agents_md(agent_id)
     task, equity = context.build_task(conn, agent_id)
     print(f"[{agent_id}] context: persona {len(agents_md)} chars, task {len(task)} chars, equity ${equity:,.2f}")
 
-    text, usage, iid = brain.run(agents_md, task)
-    cost = brain.cost_usd(usage)
-    print(f"[{agent_id}] interaction {iid} — in {usage.get('total_input_tokens')} / "
-          f"out {usage.get('total_output_tokens')} / thought {usage.get('total_thought_tokens')} "
-          f"→ ${cost}")
-
-    parsed = ops.parse(text)
+    parsed, spent, cost = _deliberate(agent_id, agents_md, task)
     results = ops.validate_and_apply(conn, agent, run_id, parsed, dry=dry)
     for op, verdict, reason in results:
         print(f"  {verdict.upper():8s} {op.get('type'):24s} {reason or ''}")
@@ -121,9 +163,8 @@ def _session(conn, agent, agent_id, run_id, dry):
             """update runs set status='completed', finished=now(), cost_usd=%s,
                tokens_in=%s, tokens_out=%s, meta=(meta - 'journal') || %s::jsonb
                where id=%s""",
-            (cost, usage.get("total_input_tokens"),
-             usage.get("total_output_tokens", 0) + usage.get("total_thought_tokens", 0),
-             json.dumps({"interaction_id": iid,
+            (cost, spent["in"], spent["out"],
+             json.dumps({"interaction_id": spent["interaction_id"],
                          "ops": [{"type": o.get("type"), "verdict": v} for o, v, _ in results]}),
              run_id),
         )

@@ -52,7 +52,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TRADER_REPO: ${{ github.workspace }}/trader
           GIT_SSH_COMMAND: ssh -i ~/.ssh/trader_key -o IdentitiesOnly=yes
-        run: python -m jobs.dispatch --triggers-only
+        run: python -c "raise SystemExit('SABOTAGE: pretending the brain refused us')"
       # Everything from here writes or publishes the record, so each one runs
       # whatever happened above it. `if: always()` and not `success()`: these
       # steps are the point of the tick.

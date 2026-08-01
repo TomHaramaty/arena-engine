@@ -289,3 +289,50 @@ def test_errors_are_printed_before_warnings(capsys):
                    doctor.Finding(doctor.ERROR, "book-drift", "b", "d")])
     out = capsys.readouterr().out
     assert out.index("book-drift") < out.index("stuck-run")
+
+
+# ---------- a promise the runtime never kept ----------
+
+def ops(type, accepted=0, rejected=0):
+    out = []
+    if accepted:
+        out.append({"type": type, "verdict": "accepted", "n": accepted})
+    if rejected:
+        out.append({"type": type, "verdict": "rejected", "n": rejected})
+    return out
+
+
+def test_an_operation_refused_every_single_time_is_a_broken_promise():
+    """The watchlist case, as it really stood on 2026-07-31."""
+    found = doctor.dead_capabilities(ops("watchlist_request", rejected=12))
+    assert [f.check for f in found] == ["dead-capability"]
+    assert found[0].level == doctor.ERROR
+    assert found[0].subject == "watchlist_request"
+    assert "12 attempted" in found[0].detail
+
+
+def test_one_acceptance_anywhere_in_the_record_clears_it():
+    """A capability that works and is often refused is the constitution doing
+    its job, which is the opposite of a finding."""
+    assert doctor.dead_capabilities(
+        ops("place_order", accepted=1, rejected=99)) == []
+
+
+def test_a_capability_barely_tried_is_not_yet_evidence():
+    """Two refusals is an agent being told no. The floor exists so the check
+    does not shout at a contract nobody has exercised."""
+    assert doctor.dead_capabilities(ops("guidance_response", rejected=2)) == []
+    assert len(doctor.dead_capabilities(
+        ops("guidance_response", rejected=doctor.DEAD_CAPABILITY_FLOOR))) == 1
+
+
+def test_each_operation_type_is_judged_on_its_own_record():
+    found = doctor.dead_capabilities(
+        ops("place_order", accepted=50, rejected=10)
+        + ops("watchlist_request", rejected=12)
+        + ops("cancel_order", accepted=8))
+    assert [f.subject for f in found] == ["watchlist_request"]
+
+
+def test_a_quiet_record_says_nothing():
+    assert doctor.dead_capabilities([]) == []

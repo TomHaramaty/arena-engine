@@ -116,11 +116,54 @@ def dispatch(triggers_only):
         raise SystemExit(1)
 
 
+def reflect_due_events(conn):
+    """Run the reflections an event has already made due, at tick latency.
+
+    The reflection discipline says a closed position, a filled stop, a drawdown
+    past the line or a dormancy charge each earn a reflection. reflect_run
+    computed that set correctly from the beginning and nothing called it: the
+    only caller was the Friday workflow, so a position closed on Monday was
+    judged on Friday, four days after the fact and with three more sessions
+    layered on top of it. Measured 2026-07-31, eight days in: two reflections
+    had ever run outside a Friday, and half the floor had never reflected at
+    all.
+
+    This runs from the hourly tick, in the same step that wakes triggered
+    agents, so it needs no new workflow and no new secret. The weekly floor
+    stays where it is. Returns the number that failed.
+    """
+    from jobs import reflect_run   # imported here: the Pro client this pulls in
+    # is dead weight on the daily dispatch, which never reflects.
+    agents = reflect_run.under_ceiling(
+        conn, reflect_run.due_agents(conn, weekly=False))
+    print(f"event-due for reflection: {agents or 'none'}")
+    failures = 0
+    for aid in agents:
+        try:
+            reflect_run.reflect_agent(conn, aid)
+        except Exception:
+            failures += 1
+            conn.rollback()
+            print(f"[{aid}] REFLECTION FAILED:")
+            traceback.print_exc()
+    return failures
+
+
 def main():
     obs.init("dispatch")
     triggers_only = "--triggers-only" in sys.argv
     if triggers_only:
-        dispatch(triggers_only=True)
+        # The two halves are independent on purpose. A brain that could not be
+        # woken must not also cost the arena the reflections that were already
+        # owed, and a reflection that fails must not hide a failed wake — so
+        # both always run, and either one failing fails the step.
+        woke_badly = False
+        try:
+            dispatch(triggers_only=True)
+        except SystemExit:
+            woke_badly = True
+        if reflect_due_events(db.connect()) or woke_badly:
+            raise SystemExit(1)
         return
     # threshold=1: the trigger is already redundant (Cloud Scheduler + GH cron
     # backup), so a missed window means both failed — a lost market slot.

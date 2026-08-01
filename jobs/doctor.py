@@ -53,6 +53,10 @@ TRIGGER_STALE_AFTER = timedelta(hours=3)
 MARK_STALE_AFTER = timedelta(hours=8)
 # Cash is dollars; a cent of float drift across thousands of fills is not news.
 CENT = 0.01
+# Attempts at one operation type before a 100% refusal rate stops being bad luck
+# and starts being a broken promise. Low on purpose: the point is to catch it in
+# the first days, not after a dozen agents have reasoned around it.
+DEAD_CAPABILITY_FLOOR = 5
 
 
 # ---------- the checks: pure, so they can be tested honestly ----------
@@ -232,6 +236,45 @@ def checkout_time(repo):
         return None
 
 
+def dead_capabilities(op_counts, floor=DEAD_CAPABILITY_FLOOR):
+    """An operation the engine has refused every single time it was attempted.
+
+    The arena's contract tells every brain what it may do. When the runtime
+    cannot honour one of those promises, nothing announces it: the agent files
+    the operation, gets a rejection, reasons around it, and writes the detour
+    into an append-only record as though it were a considered choice.
+
+    That is not hypothetical. `watchlist_request` was in the operations
+    contract from the beginning, promising that a symbol an agent asked for
+    would be resolved, priced and tradable in the same run. FINNHUB_KEY was set
+    on one step of one workflow, so no brain run could ever resolve anything,
+    and all 12 requests ever filed were refused. Discovered 2026-07-31 by
+    reading the operations table by hand, eight days in. This check is what
+    would have said so on day one.
+
+    A capability with a handful of attempts and a 100% refusal rate is broken,
+    not unlucky. One rejection is an agent being told no; a hundred with no
+    acceptance anywhere in the record is the engine failing to keep a promise
+    it is still making in the prompt.
+
+    op_counts: rows of {type, verdict, n} over the whole record, not a window —
+    a capability that worked once in April and has failed ever since is a
+    different finding, and this one deliberately never fires on it.
+    """
+    tried, ok = Counter(), Counter()
+    for r in op_counts:
+        tried[r["type"]] += r["n"]
+        if r["verdict"] == "accepted":
+            ok[r["type"]] += r["n"]
+    return [
+        Finding(ERROR, "dead-capability", t,
+                f"{tried[t]} attempted, never once accepted — the contract "
+                f"offers this and the runtime has never honoured it")
+        for t in sorted(tried)
+        if tried[t] >= floor and ok[t] == 0
+    ]
+
+
 def missing_journals(runs, repo, since=None):
     """Every completed session left an entry. Check the file is really there —
     the record is the published artifact, and Postgres saying 'completed' is not
@@ -305,9 +348,15 @@ def gather(conn, repo=None, head=None, now=None):
     fills = conn.execute(
         "select agent_id, symbol, side, qty, fill_price from fills"
     ).fetchall()
+    # Over the whole record on purpose, not the 7-day window: "has this ever
+    # worked" is the question, and a window would answer "not lately".
+    op_counts = conn.execute(
+        "select type, verdict, count(*) n from operations group by type, verdict"
+    ).fetchall()
 
     findings = (
         stranded_journals(runs)
+        + dead_capabilities(op_counts)
         + wake_loops(triggers, now)
         + book_against_fills(states, fills, launch_baselines(repo))
         + stuck_runs(runs, now)

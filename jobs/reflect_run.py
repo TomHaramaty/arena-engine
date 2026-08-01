@@ -18,7 +18,27 @@ from runner import context, reflect
 REFLECT_KINDS = ("position_closed", "stop_filled", "drawdown", "dormant")
 
 
-def due_agents(conn):
+# Event-due reflections run at tick latency, so a single agent could in
+# principle close several positions in a day and reflect after each. That is
+# affordable (measured 2026-07-31: $1.03 for 13 reflections, about $0.08 each)
+# but it is the shape of a loop, and the arena puts ceilings on shapes rather
+# than trusting that the cause is fixed. Two a day leaves room for a real
+# morning and stops a runaway.
+MAX_EVENT_REFLECTIONS_PER_DAY = 2
+
+
+def due_agents(conn, weekly=True):
+    """Agents owed a reflection.
+
+    `weekly=False` asks only for the event half: a position closed, a stop
+    filled, a drawdown, a dormancy charge. That is the half which used to wait
+    for Friday. This function has always computed the right set; until
+    2026-08-01 the only caller was the Friday workflow, so a position closed on
+    Monday was judged four days later, which is not the discipline the record
+    claims. The weekly floor deliberately stays on the Friday job: reflecting
+    on the week belongs after the week's trading is done, not at the first tick
+    after midnight.
+    """
     now = datetime.now(timezone.utc)
     out = set()
     for r in conn.execute("select id from agents where status='active'").fetchall():
@@ -27,10 +47,34 @@ def due_agents(conn):
             "select 1 from triggers_fired where agent_id=%s and kind = any(%s) and ts>%s limit 1",
             (r["id"], list(REFLECT_KINDS), since),
         ).fetchone()
-        week_floor = now.weekday() == 4 and (now - _as_dt(since)).days >= 5
+        week_floor = weekly and now.weekday() == 4 and (now - _as_dt(since)).days >= 5
         if ev or week_floor:
             out.add(r["id"])
     return sorted(out)
+
+
+def under_ceiling(conn, agents, limit=MAX_EVENT_REFLECTIONS_PER_DAY):
+    """Drop agents that have already reflected `limit` times today, and say so.
+    Counts every reflection, scheduled or event: the ceiling is on how often an
+    agent is asked to re-examine itself, not on which door the ask came through.
+    """
+    if not agents:
+        return []
+    spent = {
+        r["agent_id"]: r["n"]
+        for r in conn.execute(
+            """select agent_id, count(*) n from runs
+               where trigger='reflection'
+                 and (started at time zone 'utc')::date = (now() at time zone 'utc')::date
+               group by agent_id having count(*) >= %s""",
+            (limit,),
+        ).fetchall()
+    }
+    for aid, n in sorted(spent.items()):
+        if aid in agents:
+            print(f"[{aid}] CEILING: {n} reflections today (limit {limit}) — "
+                  f"held until tomorrow")
+    return [a for a in agents if a not in spent]
 
 
 def _as_dt(x):
@@ -112,6 +156,10 @@ def main():
             return
         agents = due_agents(conn)
         print(f"due for reflection: {agents or 'none'}")
+    elif "--events" in sys.argv:
+        # The event half only, for the hourly caller. See due_agents.
+        agents = under_ceiling(conn, due_agents(conn, weekly=False))
+        print(f"event-due for reflection: {agents or 'none'}")
     else:
         agents = [a for a in sys.argv[1:] if not a.startswith("--")]
     _run(conn, agents)

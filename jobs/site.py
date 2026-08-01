@@ -446,11 +446,23 @@ def tape_block(conn, limit=150):
         if p.get("thesis"):
             theses[(r["run_id"], p.get("symbol"))] = p["thesis"]
 
+    # `prior_close`: the price this fill executed against was quoted before the
+    # fill's own day began. The engine fills at the most recent price it holds,
+    # and outside the regular US session that is the previous close — so a
+    # market order placed at the 14:40 open bell, which runs pre-market, fills
+    # at yesterday's number. Ruled 2026-08-01: that is what really happens to a
+    # market order placed before the open, so it stands, and the tape says so
+    # rather than letting a reader assume the price was live. Worst observed
+    # was 61.7 hours, a Monday pre-market fill against Friday's close.
     for f in conn.execute(
-        """select f.*, o.kind, o.reason, o.run_id from fills f
+        """select f.*, o.kind, o.reason, o.run_id,
+                  (select max(t.ts) from ticks t
+                    where t.symbol = f.symbol and t.ts <= f.ts) as quoted_at
+           from fills f
            left join orders o on o.id = f.order_id
            order by f.ts desc limit %s""", (limit,)
     ).fetchall():
+        quoted_at = f["quoted_at"]
         ev.append({
             "t": int(f["ts"].timestamp()), "when": tlabel(f["ts"]),
             "agent": f["agent_id"], "event": "fill", "side": f["side"],
@@ -458,6 +470,8 @@ def tape_block(conn, limit=150):
             "price": float(f["fill_price"]),
             "mechanism": f["kind"] or "market",
             "note": f["reason"] or theses.get((f["run_id"], f["symbol"]), ""),
+            "prior_close": bool(
+                quoted_at and quoted_at.date() < f["ts"].date()),
         })
 
     for o in conn.execute(

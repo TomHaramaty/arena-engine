@@ -48,6 +48,27 @@ class QuoteError(Exception):
     pass
 
 
+def _key():
+    """The data-source key, or a QuoteError.
+
+    A missing key is "we could not ask", never "the answer is no", and this
+    function exists because that distinction was being lost at the one place it
+    mattered most. `os.environ["FINNHUB_KEY"]` raises KeyError, which is not
+    QuoteError, so it sailed past every carefully worded branch in `resolve`
+    and landed in the generic handler in runner/ops.py, which wrote
+    `error: 'FINNHUB_KEY'` onto the record as though it were a verdict on the
+    agent's symbol. Measured 2026-07-31: all 12 watchlist_requests ever filed
+    were refused that way, and the agents went on to trade proxies they had
+    been told not to settle for.
+    """
+    key = os.environ.get("FINNHUB_KEY")
+    if not key:
+        raise QuoteError(
+            "FINNHUB_KEY is not set in this environment — the arena could not "
+            "ask the data source, which is not a verdict on the symbol")
+    return key
+
+
 def _get(path, params, attempts=3):
     """A GET, retried with exponential backoff on transient network/HTTP errors
     (timeouts, connection resets, 429/5xx). Returns the JSON payload, or None if
@@ -140,7 +161,7 @@ def resolve(symbol):
     lookup telling an agent its instrument does not exist is the engine
     inventing a fact.
     """
-    key = os.environ["FINNHUB_KEY"]
+    key = _key()
     sym = (symbol or "").strip().upper()
     if not sym:
         return None
@@ -177,7 +198,7 @@ def fetch_quotes(symbol_map):
     """symbol_map: {internal_symbol: source_symbol}. Returns
     {internal_symbol: {price, prev_close, ts}} for every symbol that returned
     a sane quote; symbols that fail are simply absent (caller decides policy)."""
-    key = os.environ["FINNHUB_KEY"]
+    key = _key()
     out = {}
     for i, (sym, src) in enumerate(sorted(symbol_map.items())):
         if i and i % 50 == 0:

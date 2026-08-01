@@ -67,7 +67,7 @@ def test_market_buy_is_given_its_thesis_from_its_own_run():
         theses=[{"run_id": 7, "payload": {"symbol": "AMD", "thesis": "22% off the high"}}],
         fills=[{"ts": T(28), "agent_id": "maverick", "symbol": "AMD", "side": "buy",
                 "qty": 53.9, "fill_price": 456.17, "kind": "market", "reason": None,
-                "run_id": 7}],
+                "run_id": 7, "quoted_at": T(28)}],
     )
     (ev,) = site.tape_block(conn)
     assert ev["event"] == "fill" and ev["mechanism"] == "market"
@@ -80,7 +80,7 @@ def test_a_thesis_from_another_run_is_not_borrowed():
         theses=[{"run_id": 7, "payload": {"symbol": "AMD", "thesis": "22% off the high"}}],
         fills=[{"ts": T(28), "agent_id": "maverick", "symbol": "AMD", "side": "buy",
                 "qty": 1, "fill_price": 456.17, "kind": "market", "reason": None,
-                "run_id": 99}],
+                "run_id": 99, "quoted_at": T(28)}],
     )
     (ev,) = site.tape_block(conn)
     assert ev["note"] == ""
@@ -89,7 +89,7 @@ def test_a_thesis_from_another_run_is_not_borrowed():
 def test_a_stop_fill_carries_the_note_it_was_armed_with():
     conn = FakeConn(fills=[
         {"ts": T(27), "agent_id": "tempo", "symbol": "AMD", "side": "sell", "qty": 44.7,
-         "fill_price": 486.01, "kind": "trailing_stop", "reason": "P3 hard rule", "run_id": 3},
+         "fill_price": 486.01, "kind": "trailing_stop", "reason": "P3 hard rule", "run_id": 3, "quoted_at": T(27)},
     ])
     (ev,) = site.tape_block(conn)
     assert ev["mechanism"] == "trailing_stop" and ev["note"] == "P3 hard rule"
@@ -130,7 +130,7 @@ def test_a_refused_trade_is_on_the_tape_with_the_rule_that_refused_it():
 def test_the_tape_is_newest_first_and_capped():
     conn = FakeConn(fills=[
         {"ts": T(d), "agent_id": "a", "symbol": "X", "side": "buy", "qty": 1,
-         "fill_price": 1.0, "kind": "market", "reason": None, "run_id": 0}
+         "fill_price": 1.0, "kind": "market", "reason": None, "run_id": 0, "quoted_at": T(d)}
         for d in (20, 28, 24)
     ])
     events = site.tape_block(conn)
@@ -181,3 +181,41 @@ def test_public_avatar_drops_any_key_it_was_not_asked_for():
 def test_public_avatar_survives_a_missing_or_malformed_avatar():
     for garbage in (None, "owl", 7, []):
         assert site.public_avatar(garbage) == {}
+
+
+# ---- a fill against a price from an earlier day --------------------------
+
+def test_a_fill_against_a_live_price_is_not_labelled():
+    conn = FakeConn(fills=[
+        {"ts": T(28, 15, 4), "agent_id": "poppy", "symbol": "GLD", "side": "buy",
+         "qty": 10, "fill_price": 377.73, "kind": "market", "reason": None,
+         "run_id": 1, "quoted_at": T(28, 14, 50)},
+    ])
+    (ev,) = site.tape_block(conn)
+    assert ev["prior_close"] is False
+
+
+def test_a_fill_against_yesterdays_close_says_so():
+    """The 14:40 open bell runs pre-market, and pre-market the newest price the
+    engine holds is the previous close. That is what really happens to a market
+    order placed before the open, so it stands, and the tape states it rather
+    than letting a reader assume the price was live."""
+    conn = FakeConn(fills=[
+        {"ts": T(31, 8, 39), "agent_id": "poppy", "symbol": "GLD", "side": "buy",
+         "qty": 10, "fill_price": 377.73, "kind": "market", "reason": None,
+         "run_id": 1, "quoted_at": T(30, 20, 0)},
+    ])
+    (ev,) = site.tape_block(conn)
+    assert ev["prior_close"] is True
+
+
+def test_a_fill_with_no_price_behind_it_is_not_accused():
+    """Nothing in the arena can fill without a tick, but the subselect can
+    return null, and a null must never read as 'stale'."""
+    conn = FakeConn(fills=[
+        {"ts": T(28), "agent_id": "a", "symbol": "X", "side": "buy", "qty": 1,
+         "fill_price": 1.0, "kind": "market", "reason": None, "run_id": 0,
+         "quoted_at": None},
+    ])
+    (ev,) = site.tape_block(conn)
+    assert ev["prior_close"] is False

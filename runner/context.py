@@ -14,6 +14,15 @@ in code: operations that violate it are REJECTED and logged. Cash can never go
 negative; fills cost 0.15% against you; fills execute at the engine's latest
 price, which is provided in your market snapshot.
 
+That last point has a consequence you are expected to trade around. The engine
+fills at the most recent price it holds, and outside the regular US session it
+holds the prior close. So a market order you place at the open bell fills at
+yesterday's close, not at today's open, and if the market gaps overnight you
+have bought or sold at the old price. The snapshot states the time its prices
+were taken; read it. When a gap is the thing you are worried about, a standing
+order is the instrument that answers it, because those are evaluated against
+the session's real range as it happens.
+
 End your final message with exactly one fenced json block:
 
 ```json

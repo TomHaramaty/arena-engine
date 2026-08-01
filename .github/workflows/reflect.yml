@@ -1,1 +1,73 @@
-bmFtZTogcmVmbGVjdAoKb246CiAgIyBQcmltYXJ5OiBDbG91ZCBTY2hlZHVsZXIgKGFyZW5hLXJlZmxlY3Q6IDMwIDIxICogKiA1IFVUQykgdmlhCiAgIyB3b3JrZmxvd19kaXNwYXRjaC4gQmFja3VwOiBHSCBjcm9uIDE1IG1pbiBsYXRlciDigJQgcmVmbGVjdF9ydW4gLS1kdWUgaXMKICAjIGlkZW1wb3RlbnQgKGEgY29tcGxldGVkIHJlZmxlY3Rpb24gY2xvc2VzIGl0cyBvd24gZHVlIHdpbmRvdyksIHNvIGEKICAjIGRvdWJsZSBmaXJlIG5vLW9wcy4KICBzY2hlZHVsZToKICAgIC0gY3JvbjogIjQ1IDIxICogKiA1IgogIHdvcmtmbG93X2Rpc3BhdGNoOiB7fQoKY29uY3VycmVuY3k6CiAgZ3JvdXA6IGJyYWlucwogIGNhbmNlbC1pbi1wcm9ncmVzczogZmFsc2UKCmpvYnM6CiAgcmVmbGVjdDoKICAgIHJ1bnMtb246IHVidW50dS1sYXRlc3QKICAgIHRpbWVvdXQtbWludXRlczogNjAKICAgIGVudjoKICAgICAgU0VOVFJZX0RTTjogJHt7IHNlY3JldHMuU0VOVFJZX0RTTiB9fQogICAgc3RlcHM6CiAgICAgIC0gdXNlczogYWN0aW9ucy9jaGVja291dEB2NAogICAgICAtIHVzZXM6IGFjdGlvbnMvc2V0dXAtcHl0aG9uQHY1CiAgICAgICAgd2l0aDoKICAgICAgICAgIHB5dGhvbi12ZXJzaW9uOiAiMy4xMiIKICAgICAgLSBydW46IHBpcCBpbnN0YWxsIC1xICJwc3ljb3BnW2JpbmFyeV0iIHJlcXVlc3RzIGdvb2dsZS1jbG91ZC1maXJlc3RvcmUgc2VudHJ5LXNkawogICAgICAtIG5hbWU6IFNldHVwIFNTSCArIGNsb25lIHRyYWRlci1hcmVuYQogICAgICAgIGVudjoKICAgICAgICAgIFRSQURFUl9TU0hfS0VZOiAke3sgc2VjcmV0cy5UUkFERVJfU1NIX0tFWSB9fQogICAgICAgIHJ1bjogfAogICAgICAgICAgbWtkaXIgLXAgfi8uc3NoCiAgICAgICAgICBlY2hvICIkVFJBREVSX1NTSF9LRVkiID4gfi8uc3NoL3RyYWRlcl9rZXkgJiYgY2htb2QgNjAwIH4vLnNzaC90cmFkZXJfa2V5CiAgICAgICAgICBzc2gta2V5c2NhbiBnaXRodWIuY29tID4+IH4vLnNzaC9rbm93bl9ob3N0cyAyPi9kZXYvbnVsbAogICAgICAgICAgR0lUX1NTSF9DT01NQU5EPSJzc2ggLWkgfi8uc3NoL3RyYWRlcl9rZXkgLW8gSWRlbnRpdGllc09ubHk9eWVzIiBcCiAgICAgICAgICAgIGdpdCBjbG9uZSAtcSAtLWJyYW5jaCBjbGF1ZGUvYXJlbmEgZ2l0QGdpdGh1Yi5jb206VG9tSGFyYW1hdHkvdHJhZGVyLWFyZW5hLmdpdCB0cmFkZXIKICAgICAgICAgIGdpdCAtQyB0cmFkZXIgY29uZmlnIHVzZXIubmFtZSAiYXJlbmEtYm90IgogICAgICAgICAgZ2l0IC1DIHRyYWRlciBjb25maWcgdXNlci5lbWFpbCAiYXJlbmEtYm90QHVzZXJzLm5vcmVwbHkuZ2l0aHViLmNvbSIKICAgICAgLSBuYW1lOiBSdW4gZHVlIHJlZmxlY3Rpb25zCiAgICAgICAgZW52OgogICAgICAgICAgREFUQUJBU0VfVVJMOiAke3sgc2VjcmV0cy5EQVRBQkFTRV9VUkwgfX0KICAgICAgICAgIEdFTUlOSV9BUElfS0VZOiAke3sgc2VjcmV0cy5HRU1JTklfQVBJX0tFWSB9fQogICAgICAgICAgVFJBREVSX1JFUE86ICR7eyBnaXRodWIud29ya3NwYWNlIH19L3RyYWRlcgogICAgICAgICAgR0lUX1NTSF9DT01NQU5EOiBzc2ggLWkgfi8uc3NoL3RyYWRlcl9rZXkgLW8gSWRlbnRpdGllc09ubHk9eWVzCiAgICAgICAgcnVuOiBweXRob24gLW0gam9icy5yZWZsZWN0X3J1biAtLWR1ZQogICAgICAtIG5hbWU6IEJ1aWxkIGFyZW5hLmpzb24KICAgICAgICBpZjogYWx3YXlzKCkKICAgICAgICBlbnY6CiAgICAgICAgICBEQVRBQkFTRV9VUkw6ICR7eyBzZWNyZXRzLkRBVEFCQVNFX1VSTCB9fQogICAgICAgICAgVFJBREVSX1JFUE86ICR7eyBnaXRodWIud29ya3NwYWNlIH19L3RyYWRlcgogICAgICAgIHJ1bjogcHl0aG9uIC1tIGpvYnMuc2l0ZQogICAgICAjIFRoZSB3ZWVrbHkgbGV0dGVyIHJpZGVzIHRoZSByZWZsZWN0aW9uLCBub3QgdGhlIEZyaWRheSBjbG9zZTogcmVmbGVjdGlvbgogICAgICAjIGlzIHdoZW4gYSBoeXBvdGhlc2lzIGlzIHByb21vdGVkIG9yIGZhbHNpZmllZCBhbmQgdGhlIHJ1bGVib29rIGFjdHVhbGx5CiAgICAgICMgY2hhbmdlcy4gIkhlcmUgaXMgd2hhdCBJIGNoYW5nZWQgbXkgbWluZCBhYm91dCIgaXMgdGhlIHByb2R1Y3QncyB0aGVzaXMKICAgICAgIyBpbiBhbiBpbmJveDsgZml2ZSBkYWlseSBsZXR0ZXJzIHN0YXBsZWQgdG9nZXRoZXIgaXMgZmlsbGVyLgogICAgICAtIG5hbWU6IFdyaXRlIHRoZSB3ZWVrbHkgbGV0dGVycwogICAgICAgIGlmOiBhbHdheXMoKQogICAgICAgIGNvbnRpbnVlLW9uLWVycm9yOiB0cnVlCiAgICAgICAgZW52OgogICAgICAgICAgREFUQUJBU0VfVVJMOiAke3sgc2VjcmV0cy5EQVRBQkFTRV9VUkwgfX0KICAgICAgICAgIEdFTUlOSV9BUElfS0VZOiAke3sgc2VjcmV0cy5HRU1JTklfQVBJX0tFWSB9fQogICAgICAgICAgUkVTRU5EX0FQSV9LRVk6ICR7eyBzZWNyZXRzLlJFU0VORF9BUElfS0VZIH19CiAgICAgICAgICBGSVJFU1RPUkVfU0VSVklDRV9BQ0NPVU5UOiAke3sgc2VjcmV0cy5GSVJFU1RPUkVfU0VSVklDRV9BQ0NPVU5UIH19CiAgICAgICAgcnVuOiB8CiAgICAgICAgICBwcmludGYgJyVzJyAiJEZJUkVTVE9SRV9TRVJWSUNFX0FDQ09VTlQiID4gIiRSVU5ORVJfVEVNUC9mc19zYS5qc29uIgogICAgICAgICAgR09PR0xFX0FQUExJQ0FUSU9OX0NSRURFTlRJQUxTPSIkUlVOTkVSX1RFTVAvZnNfc2EuanNvbiIgXAogICAgICAgICAgICBweXRob24gLW0gam9icy5sZXR0ZXIgLS1yZWZsZWN0aW9uIC0tc2VuZAogICAgICAtIG5hbWU6IFB1c2ggZGF0YSB0byBhcmVuYS13ZWIKICAgICAgICBpZjogYWx3YXlzKCkKICAgICAgICBlbnY6CiAgICAgICAgICBBUkVOQV9XRUJfU1NIX0tFWTogJHt7IHNlY3JldHMuQVJFTkFfV0VCX1NTSF9LRVkgfX0KICAgICAgICBydW46IHwKICAgICAgICAgIGJhc2ggdG9vbHMvcHVibGlzaF9hcmVuYS5zaCAiZGF0YTogcG9zdC1yZWZsZWN0aW9uIHJlZnJlc2giCg==
+name: reflect
+
+on:
+  # Primary: Cloud Scheduler (arena-reflect: 30 21 * * 5 UTC) via
+  # workflow_dispatch. Backup: GH cron 15 min later — reflect_run --due is
+  # idempotent (a completed reflection closes its own due window), so a
+  # double fire no-ops.
+  schedule:
+    - cron: "45 21 * * 5"
+  workflow_dispatch: {}
+
+concurrency:
+  group: brains
+  cancel-in-progress: false
+
+jobs:
+  reflect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q "psycopg[binary]" requests google-cloud-firestore sentry-sdk
+      - name: Setup SSH + clone trader-arena
+        env:
+          TRADER_SSH_KEY: ${{ secrets.TRADER_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$TRADER_SSH_KEY" > ~/.ssh/trader_key && chmod 600 ~/.ssh/trader_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/trader_key -o IdentitiesOnly=yes" \
+            git clone -q --branch claude/arena git@github.com:TomHaramaty/trader-arena.git trader
+          git -C trader config user.name "arena-bot"
+          git -C trader config user.email "arena-bot@users.noreply.github.com"
+      - name: Run due reflections
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TRADER_REPO: ${{ github.workspace }}/trader
+          GIT_SSH_COMMAND: ssh -i ~/.ssh/trader_key -o IdentitiesOnly=yes
+        run: python -m jobs.reflect_run --due
+      - name: Build arena.json
+        if: always()
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TRADER_REPO: ${{ github.workspace }}/trader
+        run: python -m jobs.site
+      # The weekly letter rides the reflection, not the Friday close: reflection
+      # is when a hypothesis is promoted or falsified and the rulebook actually
+      # changes. "Here is what I changed my mind about" is the product's thesis
+      # in an inbox; five daily letters stapled together is filler.
+      - name: Write the weekly letters
+        if: always()
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          FIRESTORE_SERVICE_ACCOUNT: ${{ secrets.FIRESTORE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$FIRESTORE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/fs_sa.json"
+          GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/fs_sa.json" \
+            python -m jobs.letter --reflection --send
+      - name: Push data to arena-web
+        if: always()
+        env:
+          ARENA_WEB_SSH_KEY: ${{ secrets.ARENA_WEB_SSH_KEY }}
+        run: |
+          bash tools/publish_arena.sh "data: post-reflection refresh"

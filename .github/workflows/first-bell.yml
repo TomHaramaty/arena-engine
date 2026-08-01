@@ -73,11 +73,16 @@ jobs:
         run: |
           python -m jobs.bell "$APP_ID" failed
           echo "application rejected by seating validation — nothing to run"
+      # FINNHUB_KEY: a newborn's first act is often to ask for an instrument its
+      # charter names but the arena does not yet quote. Without this the request
+      # is refused, and the trader's very first entry records a detour it never
+      # chose to take.
       - name: First session (stage first-session)
         if: steps.agent.outputs.status == 'seated' && steps.agent.outputs.id != ''
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FINNHUB_KEY: ${{ secrets.FINNHUB_KEY }}
           TRADER_REPO: ${{ github.workspace }}/trader
           GIT_SSH_COMMAND: ssh -i ~/.ssh/trader_key -o IdentitiesOnly=yes
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/fs_sa.json

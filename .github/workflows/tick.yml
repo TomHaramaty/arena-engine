@@ -49,10 +49,15 @@ jobs:
       # green in the API and the UI, which is how an outage becomes invisible.
       # The wake stays red, the tick's conclusion stays red, and the record is
       # written and published anyway.
+      # FINNHUB_KEY: a brain run resolves and prices a symbol an agent asks for
+      # (watchlist_request). Without it that operation cannot be honoured, and
+      # for the arena's first eight days it never was: the key lived on the
+      # jobs.tick step alone, so all 17 requests ever filed were refused.
       - name: Wake triggered agents
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FINNHUB_KEY: ${{ secrets.FINNHUB_KEY }}
           TRADER_REPO: ${{ github.workspace }}/trader
           GIT_SSH_COMMAND: ssh -i ~/.ssh/trader_key -o IdentitiesOnly=yes
         run: python -m jobs.dispatch --triggers-only

@@ -50,10 +50,15 @@ jobs:
         run: |
           printf '%s' "$FIRESTORE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/fs_sa.json"
           GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/fs_sa.json" python -m jobs.guidance
+      # FINNHUB_KEY: a brain resolves and prices a symbol it asks for
+      # (watchlist_request). Without it the operation cannot be honoured, and
+      # it never was until 2026-08-01 — the key was set on the market-data step
+      # of the tick alone, so every request an agent ever filed was refused.
       - name: Run all brains
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FINNHUB_KEY: ${{ secrets.FINNHUB_KEY }}
           DAILY_SLOT: ${{ inputs.slot }}
           TRADER_REPO: ${{ github.workspace }}/trader
           GIT_SSH_COMMAND: ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes
@@ -92,6 +97,22 @@ jobs:
           if [ "$hour" -lt 17 ]; then echo "open slot — letters wait for the close"; exit 0; fi
           printf '%s' "$FIRESTORE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/fs_sa.json"
           GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/fs_sa.json" python -m jobs.letter --send
+      # A finished interview nobody countersigned produces nothing and tells
+      # nobody. One letter, once, per principal, ever: the guard is a partial
+      # unique index on the nudges table, not a check in code. Close slot only,
+      # for the same reason the letters are.
+      - name: Write to the ones who never sat down (close slot only)
+        if: always() && github.event.schedule != '50 14 * * 1-5'
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          FIRESTORE_SERVICE_ACCOUNT: ${{ secrets.FIRESTORE_SERVICE_ACCOUNT }}
+        run: |
+          hour=$(date -u +%H)
+          if [ "$hour" -lt 17 ]; then echo "open slot — the nudge waits for the close"; exit 0; fi
+          printf '%s' "$FIRESTORE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/fs_sa.json"
+          GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/fs_sa.json" python -m jobs.nudge --send
       - name: Push data to arena-web
         if: always()
         env:

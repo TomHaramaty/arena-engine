@@ -192,7 +192,13 @@ def call_pro(prompt):
     text = d["candidates"][0]["content"]["parts"][0]["text"]
     tin = usage.get("promptTokenCount", 0)
     tout = usage.get("candidatesTokenCount", 0) + usage.get("thoughtsTokenCount", 0)
-    return json.loads(text), tin, tout, round(tin * RATE_IN + tout * RATE_OUT, 4)
+    # response_mime_type=json still lets the model emit valid JSON followed by
+    # trailing content (observed 2026-07-31: "Extra data" at char 5379, which
+    # failed the whole reflection even though the operations were intact
+    # earlier in the reply). Parse only the first JSON value, same as
+    # runner/ops.py.parse already does for session output.
+    parsed = json.JSONDecoder().raw_decode(text.lstrip())[0]
+    return parsed, tin, tout, round(tin * RATE_IN + tout * RATE_OUT, 4)
 
 
 def apply_reflection(conn, agent_id, run_id, R):

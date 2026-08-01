@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 import requests
 
+from engine import core
 from runner import context, prose
 
 MODEL = "gemini-3.1-pro-preview"
@@ -146,7 +147,15 @@ def build_reflection_prompt(conn, agent_id):
                    f"(min {min(eqs):,.0f}, max {max(eqs):,.0f}); "
                    f"bench index now {marks[-1]['bench_index']}")
     closed = realized_trades(conn, agent_id, since)
-    pf, _ = context.portfolio_block(conn, agent_id)
+    pf, equity = context.portfolio_block(conn, agent_id)
+    # The bill for trading, for the period under review. The book block above
+    # already carries the since-launch figure; this is the one the verdicts in
+    # this reflection are actually answerable for. An agent that turned its
+    # book over four times to end flat has a decision to defend, and until now
+    # no reflection had the number in front of it.
+    period_cost = context.cost_line(
+        conn, agent_id, equity, since=since, label="this period"
+    ) or "no fills this period"
     journals = context.recent_journal(agent_id, n=8)
     ops_hist = conn.execute(
         """select o.type, o.verdict, o.reason, o.payload from operations o
@@ -164,6 +173,11 @@ def build_reflection_prompt(conn, agent_id):
         f"{why_now(conn, agent_id, since)}"
         f"{RULES}\n\n"
         f"## Equity trajectory this period\n{eq_line}\n\n"
+        f"## What your trading cost you\n{period_cost}\n"
+        f"Frictions are charged at {core.COST:.2%} of every fill, against you, "
+        f"on both sides. This is a fact about your book, not an instruction: "
+        f"turnover that earns its toll is well spent, and turnover that does "
+        f"not is a decision your verdicts should judge like any other.\n\n"
         f"## Closed trades this period (realized)\n"
         f"{json.dumps(closed, indent=1) if closed else 'none'}\n\n"
         f"## Current book\n{pf}\n\n"

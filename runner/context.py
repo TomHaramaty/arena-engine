@@ -130,12 +130,70 @@ def portfolio_block(conn, agent_id):
         )
     eq = float(st["cash"]) + pv
     lines.append(f"equity: ${eq:,.2f} · peak: ${float(st['peak_equity']):,.2f}")
+    cost = cost_line(conn, agent_id, eq)
+    if cost:
+        lines.append(cost)
     for o in orders:
         lines.append(
             f"standing order #{o['id']}: {o['kind']} {o['side']} {o['symbol']} "
             f"qty={o['qty'] or 'all'} params={o['params']}"
         )
     return "\n".join(lines), eq
+
+
+def trading_cost(conn, agent_id, since=None):
+    """What the act of trading has cost this agent: notional put through the
+    market, and the frictions charged on it.
+
+    An agent can read its cash, its positions and its P&L, but until now it
+    could not read the bill for trading itself. That bill is the best
+    documented way a book bleeds: in Barber and Odean's 66,465 households the
+    most active traders earned 11.4% a year against the market's 17.9%, on
+    stock picks that were no worse than anybody else's. The trading ate the
+    difference. Measured here on 2026-07-31, maverick had put $362,014 through
+    the market in nine days on a $100,000 book, paying $543, and nothing in its
+    context had ever told it so.
+
+    This is not a nudge toward caution. The mandate is unchanged and inaction
+    still has to be argued for. It is the other half of a ledger the brain has
+    been reasoning from with one side hidden: an agent that reads the number
+    and decides its edge is worth the toll has made a real decision, and today
+    it cannot even have the thought.
+
+    Frictions are derived, never stored: core.COST is applied to the engine
+    price to produce the fill price, so the toll on each fill is exactly
+    qty x |fill_price - price|. Reading it back off the fills means this can
+    never disagree with the book.
+    """
+    r = conn.execute(
+        """select count(*) n,
+                  coalesce(sum(qty * price), 0) notional,
+                  coalesce(sum(qty * abs(fill_price - price)), 0) frictions
+           from fills
+           where agent_id=%s and (%s::timestamptz is null or ts > %s)""",
+        (agent_id, since, since),
+    ).fetchone()
+    return {
+        "n": int(r["n"]),
+        "notional": float(r["notional"]),
+        "frictions": float(r["frictions"]),
+    }
+
+
+def cost_line(conn, agent_id, equity, since=None, label="since you launched"):
+    """One line of the book: what the trading cost, in the agent's own terms.
+    None when the agent has never traded, because a row of zeroes reads as an
+    accusation rather than a fact."""
+    c = trading_cost(conn, agent_id, since)
+    if not c["n"]:
+        return None
+    turns = c["notional"] / equity if equity else 0.0
+    pct = c["frictions"] / equity * 100 if equity else 0.0
+    return (
+        f"cost of trading {label}: {c['n']} fills, ${c['notional']:,.0f} put "
+        f"through the market ({turns:.1f}x your equity), ${c['frictions']:,.0f} "
+        f"paid in frictions ({pct:.2f}% of your equity)"
+    )
 
 
 def pending_guidance(conn, agent_id):

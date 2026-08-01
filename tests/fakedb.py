@@ -67,7 +67,7 @@ class FakeConn:
     def __init__(self, *, cash=100_000.0, positions=None, ticks=None,
                  watchlist=None, orders=None, guidance=None, agents=None,
                  agent_id="tempo", config=None, marks=None, triggers=None,
-                 peak=None, bench=None, fail_on=None, fail_times=1):
+                 peak=None, bench=None, fills=None, fail_on=None, fail_times=1):
         # fail_on: a statement fragment that raises a Deadlock the first
         # `fail_times` times it is executed, and leaves the transaction aborted
         # afterwards exactly as Postgres does.
@@ -92,6 +92,10 @@ class FakeConn:
         self.traded_sessions = []               # core.flag_dormancy, newest first
         self.last_reflection = None
         self.marks = list(marks or [])          # [{agent_id, ts, equity}]
+        # [{agent_id, symbol, side, qty, price, fill_price, ts}] — real rows, not
+        # a noop, because the cost of trading is read back OFF the fills so that
+        # what an agent is told can never disagree with what the book charged.
+        self.fills = list(fills or [])
         self.triggers = list(triggers or [])    # [{agent_id, kind, details, ts, handled}]
         self.writes = []                        # (normalized_sql, args)
         self.operations = []                    # (type, verdict, reason)
@@ -169,9 +173,11 @@ class FakeConn:
             ("select 1 from triggers_fired", self._r_kind_filed),
             ("select 1 from equity_marks", self._r_recovered),
             ("select cid from guidance where agent_id=", self._r_guidance_cids),
+            ("select count(*) n, coalesce(sum(qty * price), 0) notional",
+             self._r_trading_cost),
             # writes
             ("insert into orders", self._w_order),
-            ("insert into fills", self._w_noop),
+            ("insert into fills", self._w_fill),
             ("insert into positions", self._w_position),
             ("insert into triggers_fired", self._w_trigger),
             ("insert into operations", self._w_operation),
@@ -311,6 +317,34 @@ class FakeConn:
                 if m["agent_id"] == aid and m["ts"] > ts and m["equity"] >= level][:1]
 
     # writes ------------------------------------------------------------
+
+    def _r_trading_cost(self, s, a):
+        """runner/context.trading_cost. Args: (agent_id, since, since), where a
+        null `since` means since launch."""
+        agent_id, since = a[0], a[1]
+        rows = [
+            f for f in self.fills
+            if f["agent_id"] == agent_id
+            and (since is None or (f.get("ts") is not None and f["ts"] > since))
+        ]
+        return [{
+            "n": len(rows),
+            "notional": sum(f["qty"] * f["price"] for f in rows),
+            "frictions": sum(f["qty"] * abs(f["fill_price"] - f["price"])
+                             for f in rows),
+        }]
+
+    def _w_fill(self, s, a):
+        """insert into fills (order_id, agent_id, symbol, side, qty, price,
+        fill_price, ts) — the side is a literal in the SQL, so it is read off
+        the statement rather than the arguments."""
+        side = "sell" if "'sell'" in s else "buy"
+        self.fills.append({
+            "agent_id": a[1], "symbol": a[2], "side": side,
+            "qty": float(a[3]), "price": float(a[4]),
+            "fill_price": float(a[5]), "ts": a[6],
+        })
+        return []
 
     def _w_noop(self, s, a):
         return []

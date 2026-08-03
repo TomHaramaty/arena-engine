@@ -139,6 +139,80 @@ AGENTS = {
                    "avatar": {"base": "bull", "color": 5, "costume": "suit", "acc": "monocle"}},
         "bench": {"symbols": ["SPY"], "weights": [1.0]},
     },
+
+    # ------ house expansion, batch three (2026-08-03) ----------------------
+    # The catalyst class: ten books inheriting the record's proven chassis —
+    # dated edge, written memo, pre-committed stop, forced expiry — each
+    # pointed at a different high-velocity niche (rationale: trader
+    # design/house-expansion-batch-three-2026-08-03.md). Where a sleeve is the
+    # book's engine the cap is chartered wider, per the gale/talon precedent.
+    "helix": {
+        "name": "Helix", "archetype": "Biotech binary events", "brain": "antigravity-gemini",
+        # Sized for the zero: a binary can go to nothing, so the single cap is
+        # the survival mechanism, not a style preference.
+        "config": {"max_single_pct": 0.15, "max_positions": 6, "class_caps": SLEEVE,
+                   "avatar": {"base": "owl", "color": 7, "costume": "professor", "acc": "rounds"}},
+        "bench": {"symbols": ["XBI"], "weights": [1.0]},
+    },
+    "flare": {
+        "name": "Flare", "archetype": "Earnings gap continuation", "brain": "antigravity-gemini",
+        "config": {"max_single_pct": 0.35, "max_positions": 4, "class_caps": SLEEVE,
+                   "avatar": {"base": "fox", "color": 4, "costume": "pit", "acc": "visor"}},
+        "bench": {"symbols": ["SPY"], "weights": [1.0]},
+    },
+    "fuse": {
+        "name": "Fuse", "archetype": "Pre-event run-up harvest", "brain": "antigravity-gemini",
+        "config": {"max_single_pct": 0.30, "max_positions": 5, "class_caps": SLEEVE,
+                   "avatar": {"base": "cat", "color": 1, "costume": "gilet", "acc": "aviators"}},
+        "bench": {"symbols": ["SPY"], "weights": [1.0]},
+    },
+    "cipher": {
+        "name": "Cipher", "archetype": "Crypto catalysts", "brain": "antigravity-gemini",
+        "config": {"max_single_pct": 0.30,
+                   "class_caps": {"crypto": 0.50, "inverse_levered": 0.15},
+                   "avatar": {"base": "shark", "color": 6, "costume": "hoodie", "acc": "headset"}},
+        "bench": {"symbols": ["BTC-USD"], "weights": [1.0]},
+    },
+    "docket": {
+        "name": "Docket", "archetype": "Deal & date arbitrage", "brain": "antigravity-gemini",
+        "config": {"max_single_pct": 0.30, "max_positions": 6, "class_caps": SLEEVE,
+                   "avatar": {"base": "bear", "color": 0, "costume": "banker", "acc": "monocle"}},
+        "bench": {"symbols": ["SPY"], "weights": [1.0]},
+    },
+    "pivot": {
+        "name": "Pivot", "archetype": "Macro prints", "brain": "antigravity-gemini",
+        # The levered sleeve is this book's instrument of conviction — 40% by charter.
+        "config": {"max_single_pct": 0.30, "class_caps": {"inverse_levered": 0.40},
+                   "avatar": {"base": "stag", "color": 3, "costume": "suit", "acc": "none"}},
+        "bench": {"symbols": ["SPY"], "weights": [1.0]},
+    },
+    "coil": {
+        "name": "Coil", "archetype": "Squeeze hunter", "brain": "antigravity-gemini",
+        "config": {"max_single_pct": 0.20, "max_positions": 5, "cluster_cap_pct": 0.45,
+                   "class_caps": SLEEVE,
+                   "avatar": {"base": "frog", "color": 5, "costume": "pit", "acc": "headset"}},
+        "bench": {"symbols": ["IWM"], "weights": [1.0]},
+    },
+    "summit": {
+        "name": "Summit", "archetype": "Winner pyramiding", "brain": "antigravity-gemini",
+        "config": {"max_single_pct": 0.35, "max_positions": 5, "class_caps": SLEEVE,
+                   "avatar": {"base": "ram", "color": 7, "costume": "gilet", "acc": "none"}},
+        "bench": {"symbols": ["QQQ"], "weights": [1.0]},
+    },
+    "torque": {
+        "name": "Torque", "archetype": "Levered event windows", "brain": "antigravity-gemini",
+        # The widest sleeve on the floor, bound to the tightest clock: positions
+        # exist only inside named event windows, closed within 2 sessions after.
+        "config": {"max_single_pct": 0.25, "class_caps": {"inverse_levered": 0.50},
+                   "avatar": {"base": "wolf", "color": 2, "costume": "hoodie", "acc": "aviators"}},
+        "bench": {"symbols": ["SPY"], "weights": [1.0]},
+    },
+    "debut": {
+        "name": "Debut", "archetype": "New issues", "brain": "antigravity-gemini",
+        "config": {"max_single_pct": 0.25, "max_positions": 6, "class_caps": SLEEVE,
+                   "avatar": {"base": "hare", "color": 6, "costume": "suit", "acc": "rounds"}},
+        "bench": {"symbols": ["IPO"], "weights": [1.0]},
+    },
 }
 
 # Hard standing orders carried over from v1 principles (registered on the

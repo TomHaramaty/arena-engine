@@ -1,10 +1,14 @@
-"""Batch-two house agents: born by sync_house_config, prose first, rows second."""
+"""Batch-two/three house agents: born by sync_house_config, prose first, rows second."""
 import json
 
 from jobs import sync_house_config as shc
 from jobs.seed import AGENTS
 
-BATCH2 = {aid for aid, m in AGENTS.items() if "bench" in m}
+BATCH2 = {"drift", "rotor", "gale", "copper", "ember",
+          "shoal", "surge", "talon", "forge", "tide"}
+BATCH3 = {"helix", "flare", "fuse", "cipher", "docket",
+          "pivot", "coil", "summit", "torque", "debut"}
+BORN_HERE = {aid for aid, m in AGENTS.items() if "bench" in m}
 
 
 class FakeConn:
@@ -24,9 +28,9 @@ class FakeConn:
         self.commits += 1
 
 
-def test_batch_two_is_ten_agents_with_benches():
-    assert len(BATCH2) == 10
-    for aid in BATCH2:
+def test_each_expansion_batch_is_ten_agents_with_benches():
+    assert BORN_HERE == BATCH2 | BATCH3
+    for aid in BORN_HERE:
         b = AGENTS[aid]["bench"]
         assert abs(sum(b["weights"]) - 1.0) < 1e-6, f"{aid} weights must sum to 1"
         assert len(b["symbols"]) == len(b["weights"])
@@ -38,7 +42,7 @@ def test_avatars_are_distinct_from_each_other_and_the_house():
     house = [("hawk", 4, "gilet"), ("fox", 0, "suit"), ("owl", 3, "professor"),
              ("bull", 1, "pit"), ("shark", 2, "hoodie")]
     seen = set(house)
-    for aid in BATCH2:
+    for aid in sorted(BORN_HERE):
         av = AGENTS[aid]["config"]["avatar"]
         key = (av["base"], av["color"], av["costume"])
         assert key not in seen, f"{aid} wears an already-worn member: {key}"
@@ -106,3 +110,32 @@ def test_the_aggressive_spectrum_rulings_are_in_the_configs():
     assert lev["gale"] == 0.40 and lev["talon"] == 0.40 and lev["forge"] == 0.25
     assert all(v == 0.15 for aid, v in lev.items()
                if aid not in ("gale", "talon", "forge"))
+
+
+def test_the_batch_three_rulings_are_in_the_configs():
+    """The catalyst class (design/house-expansion-batch-three-2026-08-03.md):
+    every permission that departs from the batch-two spectrum is a chartered
+    ruling, and the config must say exactly what the prose says."""
+    caps = {aid: AGENTS[aid]["config"] for aid in BATCH3}
+    # helix is sized for the zero (15%), coil for the hard stop-outs (20%);
+    # everyone else stays inside the 25–35% band
+    assert caps["helix"]["max_single_pct"] == 0.15
+    assert caps["coil"]["max_single_pct"] == 0.20
+    for aid, c in caps.items():
+        if aid not in ("helix", "coil"):
+            assert 0.25 <= c["max_single_pct"] <= 0.35, aid
+    # one crypto book: cipher at 50%
+    crypto = {aid: c["class_caps"].get("crypto", 0) for aid, c in caps.items()}
+    assert crypto["cipher"] == 0.50
+    assert sum(1 for v in crypto.values() if v) == 1
+    # two levered engines: pivot 40%, torque 50%; the rest hold the 15% floor
+    lev = {aid: c["class_caps"].get("inverse_levered", 0) for aid, c in caps.items()}
+    assert lev["pivot"] == 0.40 and lev["torque"] == 0.50
+    assert all(v == 0.15 for aid, v in lev.items()
+               if aid not in ("pivot", "torque"))
+    # honest benchmarks: the specialist books are graded against their niche
+    assert AGENTS["helix"]["bench"]["symbols"] == ["XBI"]
+    assert AGENTS["cipher"]["bench"]["symbols"] == ["BTC-USD"]
+    assert AGENTS["coil"]["bench"]["symbols"] == ["IWM"]
+    assert AGENTS["summit"]["bench"]["symbols"] == ["QQQ"]
+    assert AGENTS["debut"]["bench"]["symbols"] == ["IPO"]

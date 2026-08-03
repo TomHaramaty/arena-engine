@@ -1,4 +1,5 @@
 name: reflect
+
 on:
   # Primary: Cloud Scheduler (arena-reflect: 30 21 * * 5 UTC) via
   # workflow_dispatch. Backup: GH cron 15 min later — reflect_run --due is
@@ -23,7 +24,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -q "psycopg[binary]" requests sentry-sdk
+      - run: pip install -q "psycopg[binary]" requests google-cloud-firestore sentry-sdk
       - name: Setup SSH + clone trader-arena
         env:
           TRADER_SSH_KEY: ${{ secrets.TRADER_SSH_KEY }}

@@ -2,6 +2,15 @@
 -- runs, operations, triggers are never updated after insert (orders/positions
 -- and agent_state carry current state).
 
+-- What version of this file the database is already carrying. Read by
+-- engine/db.migrate so the steady state costs one SELECT and takes no locks —
+-- see the note there for the deadlocks that bought this.
+create table if not exists schema_state (
+  id int primary key,
+  digest text not null,
+  applied_at timestamptz not null default now()
+);
+
 create table if not exists agents (
   id text primary key,
   name text not null,
@@ -38,6 +47,20 @@ create table if not exists watchlist (
 -- are enforced against. equity | etf | inverse_levered | crypto.
 alter table watchlist add column if not exists asset_class text not null default 'equity';
 alter table watchlist add column if not exists description text;
+
+-- 'active' is the only status the engine has ever read: runner/ops.py asks
+-- `where status='active'` before it will price or trade a symbol, and
+-- jobs/classify_watchlist skips everything else. Seven rows inserted on
+-- 2026-07-27 carried 'pending_engine' instead — a status no code sets, reads
+-- or promotes — and so were permanently untradable and silently so:
+-- TQQQ SQQQ SOXL SOXS SH PSQ SOL-USD. They were parked pending the per-class
+-- cap work, which shipped the same day, and were never unparked. Four house
+-- agents (torque, pivot, gale, forge) are chartered to trade THROUGH them,
+-- with inverse_levered sleeves of 25-50% that engine/core.buy_allowance has
+-- been enforcing all along; the class default is 0%, so nobody else is
+-- affected. Operator ruling 2026-08-05: activate. jobs/doctor.py now reports
+-- any status the engine does not read, so a parked row cannot go quiet again.
+update watchlist set status='active' where status='pending_engine';
 
 create table if not exists ticks (
   id bigserial primary key,

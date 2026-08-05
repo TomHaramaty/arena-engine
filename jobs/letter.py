@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import re
 
+from engine import rejections
+
 # ---------------------------------------------------------------- eligibility
 
 #: The closed list from ruling 1. An event is something that happened to the
@@ -325,7 +327,8 @@ def render_html(p, prose):
         )
     for x in p["blocked"]:
         rows.append(
-            f'<tr><td style="padding:0 0 2px 0;"><span style="color:{C["bad"]};font-weight:600;">BLOCKED</span>'
+            f'<tr><td style="padding:0 0 2px 0;"><span style="color:{C["bad"]};font-weight:600;">'
+            f'{rejections.label(x.get("cause"))}</span>'
             f' &nbsp;{x.get("side")} {x.get("symbol")}</td>'
             f'<td align="right" style="padding:0 0 2px 0;color:{C["ink2"]};">{money(x.get("notional"))}</td></tr>'
             f'<tr><td colspan="2" style="color:{C["ink2"]};font-size:12px;padding-bottom:10px;">{x.get("note", "")}</td></tr>'
@@ -434,7 +437,8 @@ def render_text(p, prose):
     for x in p["pulled"]:
         lines.append(f"  PULLED  {x.get('symbol')} {x.get('mechanism','')} @ ${float(x.get('trigger') or 0):.2f}")
     for x in p["blocked"]:
-        lines.append(f"  BLOCKED {x.get('side')} {x.get('symbol')} {money(x.get('notional'))}: {x.get('note','')}")
+        lines.append(f"  {rejections.label(x.get('cause'))} {x.get('side')} "
+                     f"{x.get('symbol')} {money(x.get('notional'))}: {x.get('note','')}")
 
     lines += ["", strip(prose.get("why")), "", "WHERE I STAND",
               f"  Book            {money(st['equity'])}",
@@ -847,7 +851,13 @@ def facts_for_voice(p) -> str:
     for x in p["pulled"]:
         out.append(f"- a resting {x.get('mechanism')} on {x.get('symbol')} was cancelled")
     for x in p["blocked"]:
-        out.append(f"- an order in {x.get('symbol')} was REFUSED by your constitution: {x.get('note')}")
+        # The cause is read off the tape, never assumed. This line used to say
+        # "was REFUSED by your constitution" for every refusal there had ever
+        # been, and the model wrote what it was told: "The constitution blocked
+        # both transactions" went out over a deadlock and a missing key.
+        out.append(f"- an order in {x.get('symbol')} "
+                   f"{rejections.attribution(x.get('cause'))}: "
+                   f"{deprice(x.get('note') or '')}")
     if not out:
         out.append("- nothing was traded today; the book is unchanged")
     h = p.get("hypothesis")

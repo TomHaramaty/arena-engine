@@ -311,6 +311,24 @@ def test_an_operation_refused_every_single_time_is_a_broken_promise():
     assert "12 attempted" in found[0].detail
 
 
+def test_a_symbol_parked_under_an_unread_status_is_a_finding():
+    """The 2026-07-27 fossil, as it really stood for nine days: seven rows in
+    'pending_engine', a status nothing sets, reads or promotes, while four
+    house agents were chartered to trade through them."""
+    found = doctor.parked_symbols([
+        {"status": "active", "n": 101, "symbols": "AAPL AMD SPY"},
+        {"status": "pending_engine", "n": 7, "symbols": "PSQ SH SOL-USD SOXL"},
+    ])
+    assert [f.check for f in found] == ["parked-symbol"]
+    assert found[0].level == doctor.ERROR
+    assert "SOXL" in found[0].detail and "pending_engine" in found[0].subject
+
+
+def test_a_watchlist_that_is_entirely_active_is_silent():
+    assert doctor.parked_symbols(
+        [{"status": "active", "n": 108, "symbols": "AAPL AMD"}]) == []
+
+
 def test_one_acceptance_anywhere_in_the_record_clears_it():
     """A capability that works and is often refused is the constitution doing
     its job, which is the opposite of a finding."""

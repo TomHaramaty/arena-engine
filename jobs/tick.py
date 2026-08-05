@@ -38,6 +38,7 @@ def _tick():
     conn = db.connect()
 
     core.insert_ticks(conn, quotes)
+    conn.commit()  # marks are durable before anything is decided off them
     for aid in core.bootstrap_launches(conn, quotes):
         print(f"FIRST BELL: {aid} launched")
     filled = core.evaluate_standing_orders(conn, quotes)

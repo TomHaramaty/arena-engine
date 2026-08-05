@@ -275,6 +275,29 @@ def dead_capabilities(op_counts, floor=DEAD_CAPABILITY_FLOOR):
     ]
 
 
+def parked_symbols(watchlist_statuses):
+    """A watchlist row under a status the engine never reads.
+
+    'active' is the only one that means anything: runner/ops.py will not price
+    or trade a symbol without it, and jobs/classify_watchlist skips the rest.
+    Seven rows sat in 'pending_engine' from 2026-07-27 to 2026-08-05 — a status
+    nothing sets, reads or promotes — so TQQQ, SQQQ, SOXL, SOXS, SH, PSQ and
+    SOL-USD were untradable, and nothing anywhere said so. Four house agents
+    were chartered to trade through them in the meantime, and one of them
+    (torque) may constitutionally trade nothing else.
+
+    A symbol is either on the watchlist or it is not. A third state is a fossil,
+    and this is what says so within the hour instead of nine days later.
+    """
+    return [
+        Finding(ERROR, "parked-symbol", f"{r['status']} · {r['n']} symbol(s)",
+                f"{r['symbols']} — the engine only ever reads status='active', "
+                f"so these are untradable and nothing tells the agents why")
+        for r in watchlist_statuses
+        if r["status"] != "active"
+    ]
+
+
 def missing_journals(runs, repo, since=None):
     """Every completed session left an entry. Check the file is really there —
     the record is the published artifact, and Postgres saying 'completed' is not
@@ -353,10 +376,16 @@ def gather(conn, repo=None, head=None, now=None):
     op_counts = conn.execute(
         "select type, verdict, count(*) n from operations group by type, verdict"
     ).fetchall()
+    watchlist_statuses = conn.execute(
+        """select status, count(*) n,
+                  string_agg(symbol, ' ' order by symbol) symbols
+           from watchlist group by status"""
+    ).fetchall()
 
     findings = (
         stranded_journals(runs)
         + dead_capabilities(op_counts)
+        + parked_symbols(watchlist_statuses)
         + wake_loops(triggers, now)
         + book_against_fills(states, fills, launch_baselines(repo))
         + stuck_runs(runs, now)

@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 from engine import db
 from engine import observability as obs
+from engine import rejections
 from engine import seating
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -493,12 +494,18 @@ def tape_block(conn, limit=150):
            order by o.created_at desc limit %s""", (limit,)
     ).fetchall():
         p = o["payload"] or {}
+        # The reason is a sentence the engine wrote to a brain. What goes into
+        # the published file is what a reader may be told about it, and the
+        # cause is carried alongside so that nothing downstream has to guess —
+        # jobs/letter.py used to introduce every one of these as "REFUSED by
+        # your constitution", and nine in ten of them were the arena breaking.
         ev.append({
             "t": int(o["created_at"].timestamp()), "when": tlabel(o["created_at"]),
             "agent": o["agent_id"], "event": "blocked", "side": p.get("side", ""),
             "symbol": p.get("symbol", ""),
             "notional": float(p["notional_usd"]) if p.get("notional_usd") else None,
-            "note": o["reason"] or "",
+            "cause": rejections.classify(o["reason"]),
+            "note": rejections.public_note(o["reason"]),
         })
 
     ev.sort(key=lambda e: e["t"], reverse=True)

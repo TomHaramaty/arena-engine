@@ -212,6 +212,21 @@ def buy_allowance(conn, agent_id, cfg, symbol, requested, prices=None):
 # ---------- DB operations ----------
 
 def insert_ticks(conn, quotes):
+    """Write marks. Does NOT commit — the caller owns the transaction.
+
+    It used to commit, and that one line killed 30 sessions on 2026-08-03/04.
+    This is called from two places: the tick, where committing was harmless,
+    and runner/ops.py's watchlist grant, which runs INSIDE a per-operation
+    SAVEPOINT. A commit ends the transaction and destroys every savepoint in
+    it, so the `RELEASE SAVEPOINT op` that followed raised
+    InvalidSavepointSpecification from a `finally` and escaped the whole batch:
+    the grant stayed (it had just been committed), the audit rows for it did
+    not, and every operation after it — the trades the session had decided on —
+    never ran at all.
+
+    A low-level write helper does not get to end a transaction it did not
+    begin. Transaction boundaries belong to the job.
+    """
     with conn.cursor() as cur:
         for sym, q in quotes.items():
             cur.execute(
@@ -220,7 +235,6 @@ def insert_ticks(conn, quotes):
                 (sym, q["ts"], q["price"], q["prev_close"],
                  q.get("high"), q.get("low"), q.get("open")),
             )
-    conn.commit()
 
 
 def _execute_sell(conn, order, price, now):

@@ -24,6 +24,8 @@ question it did not understand turns a real bug into a passing test.
 import json
 import re
 
+import psycopg
+
 
 class FakeSQLError(AssertionError):
     """A statement this fake does not know. Teach it, never ignore it."""
@@ -39,6 +41,21 @@ class InFailedSqlTransaction(Exception):
     block". Modelling this is the whole point — an except: handler that tries to
     record the failure gets THIS instead, and a second exception escapes from
     inside the first one's handler."""
+
+
+class InvalidSavepointSpecification(psycopg.errors.InvalidSavepointSpecification):
+    """`savepoint "op" does not exist`. Subclasses the real psycopg error, so
+    code that catches the real one catches this — a fake that raised a
+    look-alike would let a missing `except` clause pass its own test.
+
+    This fake used to shrug at savepoint statements — RELEASE popped whatever
+    was on the stack, ROLLBACK TO just cleared the abort flag, and neither ever
+    complained about a name it had never seen. That shrug is why four tests
+    covering the per-operation savepoint all passed while production died 30
+    times on 2026-08-03/04: a COMMIT ends the transaction and takes every
+    savepoint in it with it, so the RELEASE in the `finally` raised, escaped
+    the batch, and killed the session. Postgres is strict here, so this is
+    too."""
 
 
 def _norm(sql):
@@ -65,7 +82,7 @@ class Result:
 
 class FakeConn:
     def __init__(self, *, cash=100_000.0, positions=None, ticks=None,
-                 watchlist=None, orders=None, guidance=None, agents=None,
+                 watchlist=None, parked=None, orders=None, guidance=None, agents=None,
                  agent_id="tempo", config=None, marks=None, triggers=None,
                  peak=None, bench=None, fills=None, fail_on=None, fail_times=1):
         # fail_on: a statement fragment that raises a Deadlock the first
@@ -83,8 +100,14 @@ class FakeConn:
         # {symbol: {"qty": float, "avg_fill": float}}
         self.positions = {k: dict(v) for k, v in (positions or {}).items()}
         self.ticks = dict(ticks or {})
-        # {symbol: asset_class}
+        # {symbol: asset_class} — rows with status='active', the only status
+        # the engine reads.
         self.watchlist = dict(watchlist or {})
+        # Rows that EXIST under some other status. Postgres answers "not
+        # watchlisted" for these while `insert ... on conflict` still collides
+        # with them, which is the whole shape of the 2026-07-27 fossil: seven
+        # symbols nothing could trade and every grant silently declined to fix.
+        self.parked = set(parked or ())
         self.orders = [dict(o) for o in (orders or [])]
         self.guidance = [dict(g) for g in (guidance or [])]
         self.agents = agents or {agent_id: (config or {})}
@@ -125,9 +148,14 @@ class FakeConn:
 
     def commit(self):
         self.commits += 1
+        # A commit ends the transaction, and every savepoint inside it ceases
+        # to exist. Anything that RELEASEs one afterwards is an error, not a
+        # no-op — see InvalidSavepointSpecification.
+        self.savepoints = []
 
     def rollback(self):
-        pass
+        self.aborted = False
+        self.savepoints = []
 
     # ---------- assertions a test wants ----------
 
@@ -181,7 +209,7 @@ class FakeConn:
             ("insert into positions", self._w_position),
             ("insert into triggers_fired", self._w_trigger),
             ("insert into operations", self._w_operation),
-            ("insert into ticks", self._w_noop),
+            ("insert into ticks", self._w_tick),
             ("insert into equity_marks", self._w_mark),
             ("update agent_state set cash", self._w_cash),
             ("update agent_state set peak_equity", self._w_peak),
@@ -426,7 +454,18 @@ class FakeConn:
         return []
 
     def _w_watchlist(self, s, a):
+        # The grant IS the row being active, so it must lift a parked one.
+        self.parked.discard(a[0])
         self.watchlist[a[0]] = a[2]
+        return []
+
+    def _w_tick(self, s, a):
+        """A written tick becomes the price, because that is the entire claim
+        the watchlist grant makes: "tradable now, this run". This was a no-op
+        until 2026-08-05, so the one test of that claim could only assert that
+        the INSERT was issued, and the test after it set the price by hand —
+        between them, the promise was never actually exercised."""
+        self.ticks[a[0]] = float(a[2])
         return []
 
     def _w_savepoint(self, s, a):
@@ -436,13 +475,20 @@ class FakeConn:
     def _w_rollback_to(self, s, a):
         # The one statement Postgres accepts in an aborted transaction: it clears
         # the abort and leaves the savepoint itself in place.
+        self._require_savepoint(s.split()[-1])
         self.aborted = False
         return []
 
     def _w_release(self, s, a):
-        if self.savepoints:
-            self.savepoints.pop()
+        name = s.split()[-1]
+        self._require_savepoint(name)
+        self.savepoints.remove(name)
         return []
+
+    def _require_savepoint(self, name):
+        if name not in self.savepoints:
+            raise InvalidSavepointSpecification(
+                f'savepoint "{name}" does not exist')
 
 
 class _Cursor:

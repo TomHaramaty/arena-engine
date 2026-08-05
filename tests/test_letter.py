@@ -350,6 +350,39 @@ def test_the_voice_prompt_carries_the_charter_voice_not_an_invented_one():
     assert "sell V" in facts and "H1" in facts
 
 
+def _blocked(cause, note, symbol="NOW"):
+    p = _p()
+    p["fills"], p["pulled"], p["armed"] = [], [], []
+    p["blocked"] = [{"side": "buy", "symbol": symbol, "notional": 4000.0,
+                     "cause": cause, "note": note}]
+    return facts_for_voice(p)
+
+
+def test_an_engine_fault_is_never_narrated_as_the_principals_constitution():
+    """The letter the operator forwarded on 2026-08-03. Beacon told its
+    principal "The constitution blocked both transactions" over a deadlock and
+    a missing environment variable — because the fact pack it wrote from said
+    "was REFUSED by your constitution" for every refusal there had ever been,
+    and a model writes in the register it is handed."""
+    facts = _blocked("engine", "the arena could not complete this — a fault on "
+                               "our side, not a decision about your trader")
+    assert "constitution" not in facts.lower()
+    assert "our fault" in facts
+
+
+def test_a_real_constitutional_refusal_still_says_so():
+    """The other half: when the charter did stop the trade, that is the most
+    interesting thing that happened all day and the letter must say it."""
+    facts = _blocked("constitution", "single-position cap 20% of equity breached")
+    assert "refused by your constitution" in facts
+
+
+def test_an_unclassified_refusal_claims_no_cause():
+    facts = _blocked("unclassified", "the order was not accepted")
+    assert "constitution" not in facts.lower()
+    assert "was not accepted" in facts
+
+
 def test_facts_for_voice_never_hands_the_model_a_price():
     """It cannot state a figure it was never shown."""
     facts = facts_for_voice(_p())

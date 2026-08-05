@@ -3,6 +3,8 @@ import json
 import re
 from datetime import datetime, timezone
 
+import psycopg
+
 from engine import core, marketdata
 
 
@@ -47,6 +49,53 @@ def parse(text):
     if n_journal != 1:
         raise OpsParseError(f"expected exactly 1 journal_entry, got {n_journal}")
     return ops
+
+
+def _savepoint_stmt(conn, stmt):
+    """Run a savepoint statement. True if it took, False if the savepoint was
+    already gone. Never raises.
+
+    The per-operation savepoint is a safety net for ONE operation, and losing
+    the net must never cost the session. It did, 30 times, on 2026-08-03/04:
+    a handler committed (engine.core.insert_ticks used to), which ended the
+    transaction and destroyed the savepoint with it, so `RELEASE SAVEPOINT op`
+    raised InvalidSavepointSpecification from a `finally` — escaping the loop,
+    the batch and the run. Every one of those sessions had just been granted a
+    symbol, and every trade it had decided on afterwards was dropped in
+    silence.
+
+    The commit is fixed at its source. This exists so that the next one is a
+    logged anomaly instead of a dead session.
+    """
+    try:
+        conn.execute(stmt)
+        return True
+    except psycopg.errors.InvalidSavepointSpecification:
+        return False
+
+
+def _not_listed(results, symbol):
+    """Why this symbol cannot be traded — the true reason, not the generic one.
+
+    "file watchlist_request first" was told to agents that had filed exactly
+    that, in the same block, three lines earlier: 11 of the 21 refusals in the
+    record to 2026-08-04 were a request the engine had just failed (a missing
+    key, a deadlock, an unreachable data source) followed by an order refused
+    for the symbol the request was for. The agent then reasoned about a rule it
+    had not broken and wrote that reasoning into an append-only record, and its
+    principal was told the constitution had stopped it.
+
+    Telling an agent to do the thing it has just done is worse than telling it
+    nothing.
+    """
+    sym = (symbol or "").upper()
+    for op, verdict, reason in results:
+        if (op.get("type") == "watchlist_request"
+                and (op.get("symbol") or "").upper() == sym
+                and verdict == "rejected"):
+            return (f"{symbol} is not tradable: your watchlist_request for it in "
+                    f"this same block was refused — {reason}")
+    return f"{symbol} not on watchlist — file watchlist_request first"
 
 
 def _latest_price(conn, symbol):
@@ -109,7 +158,7 @@ def validate_and_apply(conn, agent, run_id, ops, dry=False, resolver=None):
                 if side not in ("buy", "sell"):
                     record(op, "rejected", "side must be buy or sell"); continue
                 if not _watchlisted(conn, sym):
-                    record(op, "rejected", f"{sym} not on watchlist — file watchlist_request first"); continue
+                    record(op, "rejected", _not_listed(results, sym)); continue
                 price = _latest_price(conn, sym)
                 if not price:
                     record(op, "rejected", f"no engine price for {sym}"); continue
@@ -208,7 +257,7 @@ def validate_and_apply(conn, agent, run_id, ops, dry=False, resolver=None):
                 if kind not in ("stop", "trailing_stop", "limit"):
                     record(op, "rejected", "kind must be stop|trailing_stop|limit"); continue
                 if not _watchlisted(conn, sym):
-                    record(op, "rejected", f"{sym} not on watchlist"); continue
+                    record(op, "rejected", _not_listed(results, sym)); continue
                 price = _latest_price(conn, sym)
                 params = {}
                 # Default side by kind: a trailing stop only ever protects; a
@@ -335,10 +384,22 @@ def validate_and_apply(conn, agent, run_id, ops, dry=False, resolver=None):
                            "pairs; not forex, foreign listings, indices or options")
                     continue
                 if not dry:
+                    # `on conflict do nothing` was a silent trap: a row that
+                    # already existed under any status other than 'active' was
+                    # left exactly as it was while this handler went on to
+                    # record "granted — tradable now, this run", and the very
+                    # next order in the same block was refused for a symbol the
+                    # agent had just been told it had. The grant is the row
+                    # being active; make it so, and say only what happened.
                     conn.execute(
                         """insert into watchlist (symbol, source_symbol, asset_class,
                                                   description, requested_by, status)
-                           values (%s,%s,%s,%s,%s,'active') on conflict do nothing""",
+                           values (%s,%s,%s,%s,%s,'active')
+                           on conflict (symbol) do update set
+                             status='active',
+                             source_symbol=excluded.source_symbol,
+                             asset_class=excluded.asset_class,
+                             description=excluded.description""",
                         (sym, r["source_symbol"], r["asset_class"],
                          r["description"], agent_id),
                     )
@@ -360,10 +421,14 @@ def validate_and_apply(conn, agent, run_id, ops, dry=False, resolver=None):
             else:
                 record(op, "rejected", f"unknown op type {t}")
         except Exception as e:  # one bad op never poisons the batch
-            conn.execute("ROLLBACK TO SAVEPOINT op")
+            if not _savepoint_stmt(conn, "ROLLBACK TO SAVEPOINT op"):
+                # The savepoint is gone, so there is nothing to roll back to
+                # and the connection may still be aborted. Clear it, or the
+                # record() below raises from inside this handler.
+                conn.rollback()
             record(op, "rejected", f"error: {e}")
         finally:
-            conn.execute("RELEASE SAVEPOINT op")
+            _savepoint_stmt(conn, "RELEASE SAVEPOINT op")
 
     if not dry:
         conn.commit()

@@ -552,6 +552,94 @@ def test_the_journal_still_survives_a_deadlocked_trade():
     assert entry["title"] == "the deadlocked day"
 
 
+def test_a_grant_lifts_a_symbol_that_was_parked_under_another_status():
+    """`on conflict do nothing` met the seven rows parked in 'pending_engine'
+    on 2026-07-27 and left every one of them exactly as it found it, while this
+    handler went on recording "granted — tradable now, this run". The grant is
+    the row being active."""
+    c = conn(parked={"SOL-USD"})
+    _, verdict, reason = only(apply(c, agent(), {
+        "type": "watchlist_request", "symbol": "SOL-USD"}, resolver=resolves))
+    assert verdict == "accepted" and "tradable now" in reason
+    assert "SOL-USD" not in c.parked and c.watchlist["SOL-USD"] == "crypto"
+
+
+def test_a_refused_request_is_named_by_the_order_it_refuses():
+    """11 of the 21 refusals in the record to 2026-08-04 told an agent to file
+    a watchlist_request it had filed three lines earlier, in the same block."""
+    def unreachable(symbol):
+        raise marketdata.QuoteError("data source unreachable")
+
+    c = conn()
+    results = apply(c, agent(), journal(),
+                    {"type": "watchlist_request", "symbol": "LMT"},
+                    buy(symbol="LMT", notional=4_000),
+                    resolver=unreachable)
+    reason = results[2][2]
+    assert "file watchlist_request first" not in reason
+    assert "in this same block was refused" in reason
+    assert "data source unreachable" in reason
+
+
+def test_an_order_for_a_symbol_never_asked_for_still_says_how_to_ask():
+    """The generic message is right when it IS the truth — most agents that
+    hit it simply never filed the request."""
+    _, _, reason = only(apply(conn(), agent(), buy(symbol="LMT")))
+    assert "file watchlist_request first" in reason
+
+
+# ---------- a commit mid-batch must not take the session with it ----------
+#
+# The 2026-08-03/04 outage: engine.core.insert_ticks committed, the watchlist
+# grant calls it from inside the per-operation savepoint, and a commit destroys
+# every savepoint in the transaction it ends. `RELEASE SAVEPOINT op` then raised
+# from a `finally`, escaping the batch. 30 sessions died — every one of them a
+# run that had just been granted the symbol it asked for. The grant survived
+# (it had been committed); the audit rows for it did not, and every operation
+# after it never ran.
+
+
+def test_seeding_the_grants_quote_does_not_commit():
+    """The fix at its source: a low-level write helper does not end a
+    transaction it did not begin."""
+    c = conn()
+    apply(c, agent(), {"type": "watchlist_request", "symbol": "SOL-USD"},
+          resolver=resolves)
+    assert c.commits == 1                      # the batch's own commit, and no other
+
+
+def test_a_grant_does_not_cost_the_session_its_remaining_operations():
+    """The production symptom, stated as a contract: the operations after a
+    grant are the whole reason the grant was asked for."""
+    c = conn()
+    a = agent(max_single_pct=0.5, class_caps={"crypto": 0.5})
+    results = apply(c, a, journal(),
+                    {"type": "watchlist_request", "symbol": "SOL-USD"},
+                    buy(symbol="SOL-USD", notional=10_000),
+                    resolver=resolves)
+    assert [v for _, v, _ in results] == ["accepted", "accepted", "accepted"]
+    assert c.position_qty("SOL-USD") > 0
+
+
+def test_a_handler_that_commits_is_an_anomaly_not_a_dead_session():
+    """The backstop. The commit is fixed where it lived, but the savepoint is a
+    net for ONE operation and losing the net must never cost the session — so
+    the next stray commit is a logged rejection, not 30 dead runs."""
+    c = conn()
+
+    def commits_midway(symbol):
+        c.commit()                             # what insert_ticks used to do
+        raise marketdata.QuoteError("boom")
+
+    results = apply(c, agent(max_single_pct=0.5), journal(),
+                    {"type": "watchlist_request", "symbol": "SOL-USD"},
+                    buy(symbol="AMD", notional=10_000),
+                    resolver=commits_midway)
+    assert [v for _, v, _ in results] == ["accepted", "rejected", "accepted"]
+    assert c.position_qty("AMD") > 0           # the batch carried on
+    assert c.savepoints == []
+
+
 def test_a_granted_symbol_still_answers_to_the_class_caps():
     """Being on the watchlist is permission to price something, never
     permission to hold it — the charter still decides."""

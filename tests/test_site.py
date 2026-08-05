@@ -125,6 +125,23 @@ def test_a_refused_trade_is_on_the_tape_with_the_rule_that_refused_it():
     assert ev["event"] == "blocked" and ev["symbol"] == "META"
     assert ev["notional"] == 25000
     assert ev["note"] == "single-position cap 20% of equity breached"
+    assert ev["cause"] == "constitution"
+
+
+def test_an_engine_fault_on_the_tape_carries_its_cause_and_none_of_its_guts():
+    """jobs/letter.py reads `cause` off this tape to decide whether to say the
+    word "constitution" to a principal, so the tape carrying it is a contract
+    between the two, not a decoration. The published note is what a reader may
+    see: no SQL, no environment variables, no exception text."""
+    conn = FakeConn(rejected=[
+        {"created_at": T(23), "agent_id": "beacon", "payload":
+            {"side": "buy", "symbol": "NOW", "notional_usd": 4000},
+         "reason": "error: deadlock detected\nLINE 1: select 1 from watchlist"},
+    ])
+    (ev,) = site.tape_block(conn)
+    assert ev["cause"] == "engine"
+    assert "fault on our side" in ev["note"]
+    assert "select" not in ev["note"] and "error:" not in ev["note"]
 
 
 def test_the_tape_is_newest_first_and_capped():

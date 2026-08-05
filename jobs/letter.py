@@ -693,7 +693,17 @@ def main():  # pragma: no cover - orchestration, exercised end to end
                          archive_row(agent_id, day, occasion, decision, **fields))
             conn.commit()
         except Exception as e:
-            conn.rollback()
+            # A slow voice_pass() can leave conn idle in transaction long
+            # enough for the server to kill the connection outright — observed
+            # 2026-07-31, twice: Gemini read-timeouts left the next rollback()
+            # itself raising OperationalError. Unguarded, that took the whole
+            # process down and skipped every trader after this one; a failure
+            # writing the failure record is a fact worth printing, not a
+            # reason to abort the run.
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             print(f"  {agent_id}: NOT RECORDED — {e}")
 
     if args.only:

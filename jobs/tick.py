@@ -26,10 +26,16 @@ def _tick():
     for r in conn.execute("select distinct symbol from positions").fetchall():
         symbol_map.setdefault(r["symbol"], r["symbol"])
 
+    # The quote fetch takes minutes at today's watchlist size (101 symbols on
+    # 2026-08-04, rate-limited), and a connection left idle-in-transaction
+    # across it gets killed by the host — the first write after the fetch then
+    # takes the whole tick down. Close before fetching, reconnect after.
+    conn.close()
     quotes = marketdata.fetch_quotes(symbol_map)
     print(f"quotes: {len(quotes)}/{len(symbol_map)}")
     if not quotes:
         raise SystemExit("no quotes fetched — aborting tick (no marks, no fills)")
+    conn = db.connect()
 
     core.insert_ticks(conn, quotes)
     for aid in core.bootstrap_launches(conn, quotes):

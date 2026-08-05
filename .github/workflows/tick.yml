@@ -25,7 +25,13 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           FINNHUB_KEY: ${{ secrets.FINNHUB_KEY }}
         run: python -m jobs.tick
+      # `if: always()` on the next two: the publish steps below run whatever
+      # happened above, and they read the record's prose from this clone — a
+      # failed tick must not strip journals and principles from the published
+      # arena.json (observed 2026-08-04: five ticks died on a DB timeout, the
+      # clone was skipped, and an empty-prose record went live all afternoon).
       - name: Setup SSH keys
+        if: always()
         env:
           TRADER_SSH_KEY: ${{ secrets.TRADER_SSH_KEY }}
         run: |
@@ -33,6 +39,7 @@ jobs:
           echo "$TRADER_SSH_KEY" > ~/.ssh/trader_key && chmod 600 ~/.ssh/trader_key
           ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
       - name: Clone trader-arena (prose)
+        if: always()
         run: |
           GIT_SSH_COMMAND="ssh -i ~/.ssh/trader_key -o IdentitiesOnly=yes" \
             git clone -q --branch claude/arena git@github.com:TomHaramaty/trader-arena.git trader

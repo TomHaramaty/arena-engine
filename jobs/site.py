@@ -507,6 +507,16 @@ def tape_block(conn, limit=150):
 
 def main():
     obs.init("site")
+    # The prose half of the record — journals, principles, charters — comes
+    # from the trader checkout. Publishing without it strips every agent's
+    # words from the floor (observed 2026-08-04: a failed tick skipped the
+    # clone, this job ran `if: always()`, and an empty-prose arena.json went
+    # live). A record without its prose must never publish.
+    agents_dir = TRADER / "agents"
+    if not agents_dir.is_dir() or not any(agents_dir.iterdir()):
+        raise SystemExit(
+            f"trader checkout missing at {agents_dir} — refusing to publish "
+            "a record without its prose (journals/principles/charters)")
     conn = db.connect()
     agents_rows = conn.execute(
         "select * from agents where status='active' order by id"

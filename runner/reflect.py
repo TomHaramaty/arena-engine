@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import requests
 
 from engine import core
+from engine.modelreply import first_json_object
 from runner import context, prose
 
 MODEL = "gemini-3.1-pro-preview"
@@ -206,7 +207,8 @@ def call_pro(prompt):
     text = d["candidates"][0]["content"]["parts"][0]["text"]
     tin = usage.get("promptTokenCount", 0)
     tout = usage.get("candidatesTokenCount", 0) + usage.get("thoughtsTokenCount", 0)
-    return json.loads(text), tin, tout, round(tin * RATE_IN + tout * RATE_OUT, 4)
+    return (first_json_object(text), tin, tout,
+            round(tin * RATE_IN + tout * RATE_OUT, 4))
 
 
 def apply_reflection(conn, agent_id, run_id, R):

@@ -414,7 +414,8 @@ def test_the_voice_pass_rejects_a_model_that_returns_nothing_useful():
 
 # ------------------------------------- keeping figures away from the model
 
-from jobs.letter import deprice, first_json_object  # noqa: E402
+from engine.modelreply import first_json_object  # noqa: E402
+from jobs.letter import deprice  # noqa: E402
 
 
 def test_deprice_strips_prices_from_recorded_prose():
@@ -522,6 +523,124 @@ from jobs.letter import (  # noqa: E402
     already_written,
     out_name,
 )
+
+
+# ------------------------- the failure path that took down the whole run
+#
+# 2026-07-31, twice: Neon killed the connection while voice_pass waited 300s on
+# Gemini; main()'s except called keep(..., "failed") to record it; keep()'s own
+# except called conn.rollback() on the dead connection, which raised — from
+# inside the handler meant to contain the first failure — and every trader
+# after that one silently got no letter.
+
+from jobs.letter import Archive  # noqa: E402
+
+
+class Dead:
+    """A connection the host has already terminated. Postgres does not let you
+    roll back a socket that is gone."""
+
+    def __init__(self, label="dead"):
+        self.label = label
+        self.rows = []
+
+    def execute(self, sql, args=None):
+        raise ConnectionError("the connection is lost")
+
+    def commit(self):
+        raise ConnectionError("the connection is lost")
+
+    def rollback(self):
+        raise ConnectionError("the connection is lost")
+
+    def close(self):
+        pass
+
+
+class Live:
+    def __init__(self):
+        self.rows = []
+        self.commits = 0
+
+    def execute(self, sql, args=None):
+        self.rows.append(args)
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def test_recording_a_failure_on_a_dead_connection_does_not_raise():
+    """The exact production crash. keep() is called FROM main()'s except, so
+    anything it raises escapes the per-trader guard."""
+    fresh = Live()
+    a = Archive(Dead(), "Jul 31", "close", lambda: fresh)
+    a.keep("ballast", "failed", error="Read timed out")   # must not raise
+    assert fresh.rows, "a fresh connection should still have recorded it"
+
+
+def test_a_dead_connection_is_replaced_so_the_truth_still_lands():
+    fresh = Live()
+    a = Archive(Dead(), "Jul 31", "close", lambda: fresh)
+    a.keep("ballast", "sent", reason="1 event(s) on the record")
+    assert a.conn is fresh and fresh.commits == 1
+
+
+def test_when_even_a_fresh_connection_cannot_be_had_it_says_so_and_returns():
+    """The database is gone entirely. Still not the run's problem to die of."""
+    def no_connection():
+        raise ConnectionError("neon is down")
+
+    a = Archive(Dead(), "Jul 31", "close", no_connection)
+    a.keep("ballast", "failed", error="Read timed out")   # must not raise
+
+
+def test_an_unwritable_row_never_reaches_the_caller():
+    """archive_row itself refuses an unknown decision; that ValueError must be
+    swallowed here too, or it escapes main()'s except exactly like the last
+    one did."""
+    a = Archive(Live(), "Jul 31", "close", Live)
+    a.keep("ballast", "posted")   # not in DECISIONS — must not raise
+
+
+def test_resting_before_the_model_call_ends_the_transaction():
+    """Neon kills a connection that is idle INSIDE a transaction, and
+    voice_pass blocks for up to 300s."""
+    live = Live()
+    Archive(live, "Jul 31", "close", Live).rest()
+    assert live.commits == 1
+
+
+def test_resting_replaces_a_connection_that_is_already_gone():
+    fresh = Live()
+    a = Archive(Dead(), "Jul 31", "close", lambda: fresh)
+    a.rest()                      # must not raise
+    assert a.conn is fresh
+
+
+def test_a_live_connection_is_kept_rather_than_churned():
+    """A constraint violation is not a dead socket. Rolling back is enough, and
+    reconnecting on every bad row would be its own bug."""
+    class Fussy(Live):
+        def __init__(self):
+            super().__init__()
+            self.n = 0
+
+        def execute(self, sql, args=None):
+            self.n += 1
+            if self.n == 1:
+                raise ValueError("bad row")
+            self.rows.append(args)
+
+    fussy = Fussy()
+    a = Archive(fussy, "Jul 31", "close", lambda: pytest.fail("must not reconnect"))
+    a.keep("ballast", "quiet", reason="nothing happened on the record today")
+    assert a.conn is fussy
 
 
 def test_every_column_has_a_value_to_go_in_it():

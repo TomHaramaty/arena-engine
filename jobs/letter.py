@@ -25,6 +25,7 @@ from __future__ import annotations
 import re
 
 from engine import rejections
+from engine.modelreply import first_json_object
 
 # ---------------------------------------------------------------- eligibility
 
@@ -576,6 +577,88 @@ def archive_row(agent_id, day, occasion, decision, *, reason="", subject="",
             len(html.encode("utf-8")) if html else None, error or None)
 
 
+class Archive:
+    """The record of what went out, and the connection that writes it.
+
+    This exists as an object rather than two closures inside `main()` because
+    the bug it fixes lived in a closure nobody could reach from a test. On
+    2026-07-31, twice, the whole letter run died like this:
+
+      1. `main()` holds one connection across its loop over traders. Every read
+         opens an implicit transaction, so the connection sat idle INSIDE a
+         transaction for the 300s `voice_pass` spent waiting on Gemini, and
+         Neon terminated it — the same shape as the tick incident of
+         2026-08-04.
+      2. The model call then timed out, and `main()`'s per-trader `except`
+         called `keep(..., "failed")` to record that.
+      3. `keep()`'s own `except` called `conn.rollback()` on the dead
+         connection, which raised `OperationalError`. Thrown from inside the
+         handler that was meant to contain the first failure, it escaped the
+         per-trader guard and took down every trader after it.
+
+    So: `rest()` prevents (1), and `keep()` may not raise, ever. The mail has
+    already gone by the time it is called; losing the record is the lesser
+    fault, but a run that dies rather than admit it is the greater one.
+    """
+
+    def __init__(self, conn, day, occasion, connect):
+        self.conn = conn
+        self.day = day
+        self.occasion = occasion
+        self._connect = connect
+
+    def rest(self):
+        """End the transaction before a long call. Never raises."""
+        try:
+            self.conn.commit()
+        except Exception:
+            self._reconnect()
+
+    def keep(self, agent_id, decision, **fields):
+        """Write one row about one trader. Never raises."""
+        try:
+            row = archive_row(agent_id, self.day, self.occasion, decision, **fields)
+            for attempt in (1, 2):
+                try:
+                    self.conn.execute(LETTER_INSERT, row)
+                    self.conn.commit()
+                    return
+                except Exception as e:
+                    if attempt == 2 or not self._recover():
+                        print(f"  {agent_id}: NOT RECORDED — {e}")
+                        return
+        except Exception as e:  # nothing in here may reach the caller
+            print(f"  {agent_id}: NOT RECORDED — {e}")
+
+    def close(self):
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+
+    def _recover(self):
+        """Ready the connection for one more attempt. True if worth retrying.
+
+        A live connection only needs its failed transaction rolled back. A dead
+        one needs replacing — and it is worth replacing, because the likeliest
+        reason it died is that we were waiting on the model, and the truth
+        about what we sent is the point of this table.
+        """
+        try:
+            self.conn.rollback()
+            return True
+        except Exception:
+            return self._reconnect()
+
+    def _reconnect(self):
+        self.close()
+        try:
+            self.conn = self._connect()
+            return True
+        except Exception:
+            return False
+
+
 def already_written(conn, agent_id, day, occasion):
     """Has this trader's letter for this day already gone out?
 
@@ -684,17 +767,8 @@ def main():  # pragma: no cover - orchestration, exercised end to end
         "where status='active' and owner_uid is not null order by id"
     ).fetchall()
 
-    def keep(agent_id, decision, **fields):
-        """Write one row. A failure here must never be mistaken for a failed
-        letter — the mail has already gone, and losing the record is the lesser
-        fault, but it is still a fault and it says so."""
-        try:
-            conn.execute(LETTER_INSERT,
-                         archive_row(agent_id, day, occasion, decision, **fields))
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            print(f"  {agent_id}: NOT RECORDED — {e}")
+    archive = Archive(conn, day, occasion, db.connect)
+    conn = None  # the Archive owns it now; read it back as archive.conn
 
     if args.only:
         rows = [r for r in rows if r["id"] == args.only]
@@ -716,12 +790,12 @@ def main():  # pragma: no cover - orchestration, exercised end to end
             if not send:
                 quiet += 1
                 print(f"  {aid}: quiet — {why}")
-                keep(aid, "quiet", reason=why)
+                archive.keep(aid, "quiet", reason=why)
                 continue
             # Before the model is called, because the duplicate this catches is
             # the cron backup running ten minutes behind the primary, and a
             # second voice pass would be paid for as well as unwanted.
-            if args.send and already_written(conn, aid, day, occasion):
+            if args.send and already_written(archive.conn, aid, day, occasion):
                 quiet += 1
                 print(f"  {aid}: already written today — not sending a second copy")
                 continue  # no row: nothing happened, and the first one stands
@@ -729,34 +803,35 @@ def main():  # pragma: no cover - orchestration, exercised end to end
             if not to:
                 quiet += 1
                 print(f"  {aid}: no address on file — not sending")
-                keep(aid, "quiet", reason="no address on file")
+                archive.keep(aid, "quiet", reason="no address on file")
                 continue
+            archive.rest()  # no open transaction while the model thinks
             prose = voice_pass(p)  # the model writes connective prose only
             msg = envelope(p, prose, to)
             written = preview(args.out, msg, aid, day) if args.out else ""
             if not args.send:
                 print(f"  {aid}: WOULD SEND to {to} — {why} — {len(msg['html'])} bytes"
                       + (f" — {written}" if written else ""))
-                keep(aid, "dry", reason=why, subject=msg["subject"],
+                archive.keep(aid, "dry", reason=why, subject=msg["subject"],
                      owner_uid=row["owner_uid"], html=msg["html"], plain=msg["text"])
                 continue
             status, body = deliver(msg, key)
             sent += 1
             print(f"  {aid}: sent to {to} — {why} — {status} {body.get('id', '')}"
                   + (f" — {written}" if written else ""))
-            keep(aid, "sent", reason=why, subject=msg["subject"],
+            archive.keep(aid, "sent", reason=why, subject=msg["subject"],
                  owner_uid=row["owner_uid"], provider_id=body.get("id", ""),
                  html=msg["html"], plain=msg["text"])
         except ProseStatesQuantity as e:
             failed += 1
             print(f"  {aid}: REFUSED — {e}")
-            keep(aid, "refused", error=str(e))
+            archive.keep(aid, "refused", error=str(e))
         except Exception as e:  # one trader's failure never silences the rest
             failed += 1
             print(f"  {aid}: failed — {e}")
-            keep(aid, "failed", error=str(e))
+            archive.keep(aid, "failed", error=str(e))
 
-    conn.close()
+    archive.close()
     print(f"letters: {sent} sent, {quiet} quiet, {failed} failed"
           + ("" if args.send else "  (dry — pass --send to deliver)")
           + (f"  (written to {args.out})" if args.out else ""))
@@ -878,43 +953,6 @@ VOICE_MODEL = "gemini-3.1-pro-preview"
 #: A reply can arrive truncated or with a figure in it. Ask again rather than
 #: repair it; give up after this many and send nothing.
 VOICE_ATTEMPTS = 3
-
-
-def first_json_object(text: str) -> dict:
-    """The first complete JSON object in a model reply.
-
-    Even asked for JSON, a model may wrap it in fences or add a sentence after
-    the closing brace — which is a hard parse error, and one that would drop a
-    letter that was otherwise fine. Scanning for the first balanced object is
-    the smaller evil; anything genuinely malformed still raises.
-    """
-    import json as _json
-
-    s = (text or "").strip()
-    if s.startswith("```"):
-        s = re.sub(r"^```[a-z]*\s*|\s*```$", "", s, flags=re.I | re.S).strip()
-    start = s.find("{")
-    if start < 0:
-        raise ValueError("no json object in the model reply")
-    depth, in_str, esc = 0, False, False
-    for i, ch in enumerate(s[start:], start):
-        if in_str:
-            if esc:
-                esc = False
-            elif ch == "\\":
-                esc = True
-            elif ch == '"':
-                in_str = False
-            continue
-        if ch == '"':
-            in_str = True
-        elif ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return _json.loads(s[start:i + 1])
-    raise ValueError("unterminated json object in the model reply")
 
 
 def _ask_model(prompt):  # pragma: no cover - the real brain

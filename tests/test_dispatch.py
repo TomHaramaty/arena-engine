@@ -152,6 +152,80 @@ def test_one_agents_failure_never_blocks_the_others(monkeypatch):
     assert conn.rolled_back == 1
 
 
+# ---------- how loudly a failure is allowed to be reported ----------
+#
+# Every scheduled dispatch between 2026-08-03 and 2026-08-13 went red on three
+# to six brains out of thirty-five, so the day GitHub's git operations went down
+# and no brain ran at all looked exactly like the eighteen days before it.
+
+def _floor(n):
+    return [chr(ord("a") + i) for i in range(n)]
+
+
+def _fails(*ids):
+    def run(_conn, aid, trigger):
+        if aid in ids:
+            raise RuntimeError("the operations block is not valid json")
+    return run
+
+
+def test_a_few_flaky_brains_do_not_make_the_slot_a_failure(monkeypatch, capsys):
+    """Thirty-two of thirty-five sessions happened. That is the slot working."""
+    conn = StubConn(due=_floor(35))
+    monkeypatch.setattr(dispatch.db, "connect", lambda: conn)
+    monkeypatch.setattr(dispatch, "run_agent", _fails("a", "b", "c"))
+    dispatch.dispatch(triggers_only=False)   # green
+    out = capsys.readouterr().out
+    assert "dispatch done: 32/35 succeeded" in out
+    assert "within the tolerance of 3" in out
+
+
+def test_a_slot_losing_more_than_a_tenth_of_the_floor_is_a_failure(monkeypatch):
+    conn = StubConn(due=_floor(35))
+    monkeypatch.setattr(dispatch.db, "connect", lambda: conn)
+    monkeypatch.setattr(dispatch, "run_agent", _fails("a", "b", "c", "d"))
+    with pytest.raises(SystemExit):
+        dispatch.dispatch(triggers_only=False)
+
+
+def test_a_tolerated_failure_is_still_reported(monkeypatch):
+    """Green must never mean unnoticed: the exception the loop absorbs is the
+    only trace that agent lost its session."""
+    seen = []
+    conn = StubConn(due=_floor(35))
+    monkeypatch.setattr(dispatch.db, "connect", lambda: conn)
+    monkeypatch.setattr(dispatch, "run_agent", _fails("a"))
+    monkeypatch.setattr(dispatch.obs, "capture",
+                        lambda exc, **tags: seen.append(tags))
+    dispatch.dispatch(triggers_only=False)
+    assert seen == [{"agent": "a", "trigger": "scheduled"}]
+
+
+def test_the_one_agent_woken_by_an_event_still_fails_the_step(monkeypatch):
+    """A tenth of one is none: tolerance scales with the floor and never
+    silences a dispatch small enough for the failure to be the whole of it."""
+    conn = StubConn(due=["tempo"])
+    monkeypatch.setattr(dispatch.db, "connect", lambda: conn)
+    monkeypatch.setattr(dispatch, "run_agent", _fails("tempo"))
+    with pytest.raises(SystemExit):
+        dispatch.dispatch(triggers_only=True)
+
+
+# ---------- the guard that decides whether a slot may be given back ----------
+
+def test_a_session_that_never_touched_the_book_is_not_counted_as_run(monkeypatch):
+    """The backup trigger exists for exactly this: the primary's parse failures
+    are the agents most owed a session, and until 2026-08-13 they were the ones
+    it skipped."""
+    conn = StubConn(due=[])
+    monkeypatch.setattr(dispatch.db, "connect", lambda: conn)
+    monkeypatch.setenv("DAILY_SLOT", "open")
+    dispatch.dispatch(triggers_only=False)
+    sql, _ = conn.asked[0]
+    assert "r.status = 'failed'" in sql
+    assert "coalesce((r.meta->>'retryable')::boolean, false)" in sql
+
+
 def test_a_quiet_arena_does_nothing_and_says_so(monkeypatch, capsys):
     conn = StubConn(due=[])
     monkeypatch.setattr(dispatch.db, "connect", lambda: conn)

@@ -8,8 +8,9 @@ All active agents run both daily slots. The slot comes from DAILY_SLOT
 ('open'|'close', set by the workflow) or is inferred from the clock — the
 Cloud Scheduler dispatches fire at 14:40 UTC (open) and 20:40 UTC (close),
 and a GitHub cron backup fires at :50. Duplicate triggers are safe: an agent
-that already has a scheduled run this slot today is skipped, so the backup
-is a no-op whenever the primary fired.
+that already has a scheduled run this slot today is skipped, so the backup is a
+no-op whenever the primary fired — except for the agents whose session died
+before it could touch the book, which is exactly what the backup is for.
 """
 import os
 import sys
@@ -36,6 +37,23 @@ from jobs.agent_run import run_agent
 # exists for, they are already once-per-slot, and an agent must never lose one
 # because its morning was noisy.
 MAX_EVENT_SESSIONS_PER_DAY = 6
+
+
+#: What share of a dispatch may fail before the step itself is a failure.
+#:
+#: Every scheduled dispatch from 2026-08-03 to 2026-08-13 went red, on three to
+#: six agents out of thirty-five, every time. A signal that fires on every
+#: single run is not a signal, and the one day something else was actually
+#: broken — GitHub's git operations were degraded at 14:32-14:45 UTC on
+#: 2026-08-13 and the run died before a brain woke — looked exactly like the
+#: eighteen days of noise before it.
+#:
+#: So: one flaky brain is a fact about that brain, reported to Sentry and
+#: printed here, and the slot still happened. Four is a fact about the arena and
+#: the step goes red. This is a threshold on the noise, not a licence to lose
+#: sessions — every tolerated failure is captured, and one whose book was left
+#: untouched is re-fired by the backup trigger ten minutes later.
+FAILURE_TOLERANCE = 0.10
 
 
 def over_ceiling(conn, limit=MAX_EVENT_SESSIONS_PER_DAY):
@@ -78,7 +96,14 @@ def dispatch(triggers_only):
         # - already-ran: skip any agent with a scheduled run this slot today
         #   (a crashed 'started' run also counts — brain runs are not
         #   idempotent, so a partial run must not be blindly re-fired; its
-        #   failure reaches Sentry instead).
+        #   failure reaches Sentry instead). The exception is a run marked
+        #   retryable, which says the session died before it could touch the
+        #   book (see agent_run.untouched_book): nothing was applied, so the
+        #   agent is owed the session and the backup trigger is the one thing
+        #   in the system positioned to give it back. Until 2026-08-13 it did
+        #   the opposite — the failed row counted as a run, so the backup
+        #   skipped precisely the agents that had lost their slot, and beacon
+        #   quietly lost nine sessions in twelve days.
         # - first-bell: if the principal rang the first bell today
         #   (jobs/agent_run --trigger first-bell), later slots skip the
         #   newborn rather than running it twice on day one.
@@ -89,7 +114,9 @@ def dispatch(triggers_only):
                    and r.trigger = 'scheduled'
                    and (r.started at time zone 'utc')::date = current_date
                    and (case when extract(hour from r.started at time zone 'utc') < 17
-                        then 'open' else 'close' end) = %s)
+                        then 'open' else 'close' end) = %s
+                   and not (r.status = 'failed'
+                            and coalesce((r.meta->>'retryable')::boolean, false)))
                and not (coalesce(tier,'house') = 'seated' and exists (
                  select 1 from runs r where r.agent_id = a.id
                    and r.trigger = 'first-bell'
@@ -106,14 +133,20 @@ def dispatch(triggers_only):
     for r in rows:
         try:
             run_agent(conn, r["id"], trigger=trigger)
-        except Exception:
+        except Exception as e:
             failures += 1
             conn.rollback()
             print(f"[{r['id']}] FAILED:")
             traceback.print_exc()
+            obs.capture(e, agent=r["id"], trigger=trigger)
     print(f"dispatch done: {len(rows) - failures}/{len(rows)} succeeded")
-    if failures:
+    tolerated = int(len(rows) * FAILURE_TOLERANCE)
+    if failures > tolerated:
         raise SystemExit(1)
+    if failures:
+        print(f"{failures} failed, within the tolerance of {tolerated} for "
+              f"{len(rows)} agents — reported, and re-fired by the backup "
+              "trigger if the book was left untouched. The step is green.")
 
 
 def reflect_due_events(conn):

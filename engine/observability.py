@@ -15,6 +15,7 @@ threshold.
 """
 import contextlib
 import os
+import traceback
 
 _DSN = os.environ.get("SENTRY_DSN")
 _ready = False
@@ -66,3 +67,28 @@ def cron(monitor_slug, crontab, checkin_margin=10, max_runtime=15,
     }
     with monitor(monitor_slug=monitor_slug, monitor_config=monitor_config):
         yield
+
+
+def capture(exc, **tags):
+    """Report an exception the job handled and carried on from.
+
+    Unhandled exceptions arrive on their own. This is for the ones a job
+    deliberately absorbs — one agent's failed session, which must not take the
+    other thirty-four down with it. Absorbing it is right; losing it is not, and
+    a failure that only exists in a workflow log is a failure nobody reads.
+
+    The caller is already inside an except block holding something more
+    important than this, so reporting never raises over it.
+    """
+    if not _ready:
+        return False
+    try:
+        import sentry_sdk
+        with sentry_sdk.new_scope() as scope:
+            for k, v in tags.items():
+                scope.set_tag(k, v)
+            sentry_sdk.capture_exception(exc)
+        return True
+    except Exception:
+        traceback.print_exc()
+        return False

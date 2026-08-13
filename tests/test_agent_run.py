@@ -4,7 +4,8 @@ Two things were true of a crashed run before 2026-07-30: its row stayed
 'started' forever, indistinguishable from a session still in flight (seven of
 them had piled up), and if it died between applying the operations and pushing
 the journal, the explanation for real trades existed nowhere. The dispatcher
-never re-fires a crashed run, so nothing would ever have written it.
+re-fires a crashed run only when the row says the book was never touched, so
+for anything past that point nothing would ever have written it.
 """
 import json
 
@@ -75,6 +76,35 @@ def test_an_unparseable_answer_is_a_failed_run_not_a_silent_one(arena, monkeypat
     with pytest.raises(ops.OpsParseError):
         agent_run.run_agent(c, "tempo")
     assert c.runs[0]["status"] == "failed"
+
+
+# ---------- whether the backup may give the session back ----------
+
+def test_a_block_that_never_parsed_left_the_book_untouched(arena, monkeypatch):
+    """The parse is the gate: nothing was ordered and nothing journalled, so
+    the dispatcher's backup may re-fire this one."""
+    brain_says(monkeypatch, "I would rather not use the format.")
+    c = conn()
+    with pytest.raises(ops.OpsParseError):
+        agent_run.run_agent(c, "tempo")
+    assert c.runs[0]["meta"]["retryable"] is True
+
+
+def test_any_other_death_is_assumed_to_have_moved_the_book(arena, monkeypatch):
+    """A session that died anywhere else may have placed an order first. It is
+    never re-fired, however cheap the failure looks."""
+    monkeypatch.setattr(brain, "run", lambda *a, **k: (_ for _ in ()).throw(
+        brain.BrainError("HTTP 503: unavailable")))
+    c = conn()
+    with pytest.raises(brain.BrainError):
+        agent_run.run_agent(c, "tempo")
+    assert c.runs[0]["meta"]["retryable"] is False
+
+
+def test_the_untouched_book_test_is_the_exception_not_the_message():
+    assert agent_run.untouched_book(ops.OpsParseError("no fenced json block"))
+    assert not agent_run.untouched_book(RuntimeError(
+        "the operations block is not valid json"))
 
 
 def test_a_dry_run_leaves_no_row_to_mark(arena, monkeypatch):
@@ -148,6 +178,13 @@ def test_a_completed_run_does_not_keep_two_copies_of_its_entry(arena, monkeypatc
 
 GOOD = '```json\n{"operations": [{"type": "journal_entry", "title": "t", "body_markdown": "b"}]}\n```'
 BAD = '```json\n{"operations": [oops]}\n```'
+
+#: helix, 2026-08-12 20:53 UTC, verbatim in shape: everything between
+#: `"operations":` and the middle of the journal body is missing, and the tail
+#: closes as if nothing had happened.
+GROUNDED_HOLE = ('```json\n{"operations":. Supported by Fast Track designation'
+                 ' and two pivotal Phase 3 trials.\\n\\n## Rationale\\n- The'
+                 ' stock is trading at $100.73."}\n]}\n```')
 USAGE = {"total_input_tokens": 100, "total_output_tokens": 10, "total_thought_tokens": 5}
 
 
@@ -187,9 +224,29 @@ def test_both_attempts_are_paid_for_and_counted():
     assert cost == round(2 * brain.cost_usd(USAGE), 4)
 
 
-def test_a_brain_that_cannot_be_read_twice_fails_the_session():
+def test_a_brain_that_cannot_be_read_at_all_fails_the_session():
     """Retrying a flake is not the same as papering over a broken brain."""
-    run, calls = replies(BAD, BAD)
+    run, calls = replies(*[BAD] * agent_run.DELIBERATION_ATTEMPTS)
     with pytest.raises(ops.OpsParseError):
         agent_run._deliberate("ballast", "persona", "task", run=run)
     assert len(calls) == agent_run.DELIBERATION_ATTEMPTS
+
+
+def test_the_grounded_flake_is_asked_past_rather_than_lost():
+    """Gemini's grounded answers came back with a hole in them 10 times in 45 on
+    2026-08-12 — the block resumes mid-sentence right after `"operations":`.
+    Two attempts lost three sessions that day; the fourth attempt is what makes
+    a run of bad luck cost a retry instead of a market slot."""
+    assert agent_run.DELIBERATION_ATTEMPTS >= 4
+    run, calls = replies(GROUNDED_HOLE, BAD, BAD, GOOD)
+    parsed, spent, _ = agent_run._deliberate("ballast", "persona", "task", run=run)
+    assert parsed[0]["title"] == "t"
+    assert len(calls) == 4
+    assert spent["interaction_id"] == "i4"
+
+
+def test_the_hole_in_a_grounded_answer_is_unreadable_not_half_read():
+    """It must fail the parse outright. The one thing worse than losing the
+    session is filing a journal entry that starts mid-sentence."""
+    with pytest.raises(ops.OpsParseError):
+        ops.parse(GROUNDED_HOLE)

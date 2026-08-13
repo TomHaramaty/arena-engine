@@ -23,6 +23,7 @@ have — the one class of bug that would make the whole record untrustworthy.
   python -m jobs.doctor --quiet      # findings only
   python -m jobs.doctor --no-network # skip the published-face check
 """
+import contextlib
 import os
 import sys
 from collections import Counter, namedtuple
@@ -53,6 +54,15 @@ TRIGGER_STALE_AFTER = timedelta(hours=3)
 MARK_STALE_AFTER = timedelta(hours=8)
 # Cash is dollars; a cent of float drift across thousands of fills is not news.
 CENT = 0.01
+# How long an entry is allowed to still be on its way before its absence means
+# anything. The record is pushed from four workflows (tick, daily-run, reflect,
+# first-bell) out of four separate clones, each retrying a rejected push with a
+# rebase, and doctor reads a clone taken at the start of its own job — so "not in
+# my copy" and "not in the record" are different facts for a while after a
+# session ends. Generous on purpose: a journal that really was lost is still
+# reported on the next tick half an hour later, and the whole worth of this check
+# is that a finding means something.
+JOURNAL_LANDS_WITHIN = timedelta(minutes=15)
 # Attempts at one operation type before a 100% refusal rate stops being bad luck
 # and starts being a broken promise. Low on purpose: the point is to catch it in
 # the first days, not after a dozen agents have reasoned around it.
@@ -123,11 +133,19 @@ def launch_baselines(repo):
     starting balance the fills are added to. Without them this check reads the
     launch as $80,000 of unexplained cash, which is exactly the kind of standing
     false alarm that teaches an operator to ignore a checker.
+
+    None means the record could not be read at all, which is a different fact
+    from "no agent has a snapshot" and has to stay tellable apart from it: on
+    2026-08-05 this returned {} for a clone that had failed, and the check it
+    feeds duly reported $25,000, $25,000 and $80,000 of unexplained cash on
+    maverick, tempo and vertex — their launch snapshots, to the dollar. The
+    paragraph above had already called that shot; the code just had no way to
+    say "I could not look."
     """
     out = {}
     agents_dir = (repo / "agents") if repo else None
     if not agents_dir or not agents_dir.exists():
-        return out
+        return None
     for path in sorted(agents_dir.glob("*/portfolio.json")):
         import json
         try:
@@ -140,6 +158,31 @@ def launch_baselines(repo):
                             for p in pf.get("positions") or []}),
         }
     return out
+
+
+def check_book(states, fills, baselines):
+    """The book check, or an honest refusal to make it.
+
+    book_against_fills is the strongest thing here and the loudest when it
+    fires, so it must never be run on inputs it cannot stand behind. Without the
+    launch snapshots the founding five's seeded cash and positions have no fills
+    to explain them, and the check reports the day the arena opened as money
+    gone missing — eight ERRORs on 2026-08-05, every one of them false, from a
+    tick whose clone step had failed a minute earlier.
+
+    jobs/site already refuses in exactly this case ("refusing to publish a
+    record without its prose"). This is the same refusal for the same reason: a
+    check that did not run is a fact worth reporting, and it is not the same
+    fact as a check that passed.
+    """
+    if baselines is None:
+        return [Finding(
+            ERROR, "book-uncheckable", "-",
+            "the record is not here (no agents/ under TRADER_REPO), so the "
+            "launch snapshots cannot be read and cash cannot be checked "
+            "against the fills — this says nothing about the book, only that "
+            "nobody checked it")]
+    return book_against_fills(states, fills, baselines)
 
 
 def book_against_fills(states, fills, baselines=None):
@@ -298,19 +341,34 @@ def parked_symbols(watchlist_statuses):
     ]
 
 
-def missing_journals(runs, repo, since=None):
+def missing_journals(runs, repo, since=None, now=None):
     """Every completed session left an entry. Check the file is really there —
     the record is the published artifact, and Postgres saying 'completed' is not
-    the same fact as a reader being able to read it."""
+    the same fact as a reader being able to read it.
+
+    Both gates below say the same thing in two ways: only judge a run whose entry
+    has had time to land. The working-copy gate alone was not enough. It reads
+    HEAD's commit time as "everything older than this is present", which is not
+    what HEAD's commit time means when four workflows push to the record from
+    four clones: on 2026-08-12 some other agent's commit landed just before this
+    job cloned, dragging the cutoff past the start of debut's run 977 while run
+    977's own push was still in flight, and the tick went red for twenty-three
+    minutes over a journal that was already on its way. Backing the cutoff off by
+    JOURNAL_LANDS_WITHIN is what makes it mean what it was always read to mean.
+    """
     if not repo or not repo.exists():
         return []
     cutoff = since if since is not None else checkout_time(repo)
+    if cutoff is not None:
+        cutoff -= JOURNAL_LANDS_WITHIN
     out = []
     for r in runs:
         if r["status"] != "completed":
             continue
         if cutoff is not None and r["started"] > cutoff:
             continue          # this working copy predates the entry
+        if now is not None and now - r["started"] < JOURNAL_LANDS_WITHIN:
+            continue          # too young to be called missing by any clone
         day = r["started"].astimezone(timezone.utc).date().isoformat()
         path = repo / "agents" / r["agent_id"] / "journal" / f"{day}.md"
         if not path.exists():
@@ -347,8 +405,42 @@ def _ago(delta):
 
 # ---------- reading the live arena ----------
 
+@contextlib.contextmanager
+def snapshot(conn):
+    """Read the arena as it stood at one instant, not as it moved under us.
+
+    book_against_fills compares cash and positions against the sum of every
+    fill, and the engine writes both halves of that in one transaction — so the
+    two are only ever inconsistent to a reader who looks at them at two
+    different moments. Under Postgres's default READ COMMITTED, two sequential
+    selects are two different moments, and a dispatch committing a trade between
+    them would be enough to show half a trade as drift.
+
+    This has never been observed, and it is NOT the explanation for the false
+    drift of 2026-08-05 — that was a failed clone and missing launch snapshots,
+    and check_book now refuses that case outright. The hole is real all the
+    same, and it is the kind that would produce exactly the finding an operator
+    must never learn to wave away.
+
+    REPEATABLE READ pins one snapshot for the whole transaction, so the check
+    compares halves of the same instant. Nothing here writes; the transaction is
+    rolled back either way.
+    """
+    conn.rollback()          # the SET must be the first statement of the tx
+    conn.execute("set transaction isolation level repeatable read")
+    try:
+        yield
+    finally:
+        conn.rollback()
+
+
 def gather(conn, repo=None, head=None, now=None):
     now = now or datetime.now(timezone.utc)
+    with snapshot(conn):
+        return _read_and_check(conn, repo, head, now)
+
+
+def _read_and_check(conn, repo, head, now):
     runs = conn.execute(
         """select id, agent_id, trigger, status, started,
                   meta->'journal'->>'title' as journal_title
@@ -387,11 +479,11 @@ def gather(conn, repo=None, head=None, now=None):
         + dead_capabilities(op_counts)
         + parked_symbols(watchlist_statuses)
         + wake_loops(triggers, now)
-        + book_against_fills(states, fills, launch_baselines(repo))
+        + check_book(states, fills, launch_baselines(repo))
         + stuck_runs(runs, now)
         + stale_marks(states, now)
         + stale_triggers(triggers, now)
-        + missing_journals(runs, repo)
+        + missing_journals(runs, repo, now=now)
     )
     if head:
         findings += missing_faces([st["agent_id"] for st in states], head)

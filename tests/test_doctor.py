@@ -113,6 +113,43 @@ def test_baselines_are_read_from_the_launch_snapshots(tmp_path):
     assert "catalyst" not in base          # no snapshot: starts at the full float
 
 
+def test_a_record_that_could_not_be_read_is_not_an_empty_record(tmp_path):
+    """{} means nobody was seeded; None means nobody looked. On 2026-08-05 a
+    failed clone made those the same value."""
+    assert doctor.launch_baselines(tmp_path / "nope") is None
+    assert doctor.launch_baselines(None) is None
+    (tmp_path / "agents").mkdir()
+    assert doctor.launch_baselines(tmp_path) == {}
+
+
+def test_the_book_is_not_checked_against_snapshots_nobody_could_read():
+    """The exact 2026-08-05 shape: vertex's launch book, no baselines to explain
+    it. Eight ERRORs went out that day; the honest answer is that the check did
+    not run."""
+    states = [state("vertex", cash=20_000.0, positions={"NVDA": 164.9249})]
+    assert doctor.book_against_fills(states, [], {}), \
+        "without the refusal this is the false alarm that fired"
+    findings = doctor.check_book(states, [], None)
+    assert [f.check for f in findings] == ["book-uncheckable"]
+    assert "nobody checked it" in findings[0].detail
+
+
+def test_a_readable_record_is_still_checked():
+    baselines = {"vertex": {"cash": 20_000.0, "pos": Counter({"NVDA": 164.9249})}}
+    states = [state("vertex", cash=20_000.0, positions={"NVDA": 164.9249})]
+    assert doctor.check_book(states, [], baselines) == []
+    moved = [state("vertex", cash=15_000.0, positions={"NVDA": 164.9249})]
+    assert [f.check for f in doctor.check_book(moved, [], baselines)] == ["book-drift"]
+
+
+def test_an_unreadable_record_is_loud_not_quiet():
+    """A check that silently did not run is how eight days of phantom drift got
+    filed as a race. It has to cost an exit code."""
+    findings = doctor.check_book([], [], None)
+    assert findings[0].level == doctor.ERROR
+    assert doctor.report(findings) == 1
+
+
 def test_an_agent_born_after_launch_starts_from_the_standard_float():
     """Seated traders have no snapshot — they start at $100,000 and every move
     after that is a fill."""
@@ -225,6 +262,35 @@ def test_a_run_newer_than_this_working_copy_is_not_missing(tmp_path):
         [run(agent="ledger", ago_h=5)], tmp_path, since=taken) != []
 
 
+def test_an_entry_still_on_its_way_is_not_called_missing(tmp_path):
+    """2026-08-12: the tick went red on debut's run 977 and the next tick, with
+    no commit to main in between, was clean. Four workflows push the record from
+    four clones; another agent's commit landing just before this one cloned
+    dragged the cutoff past a run whose own push had not finished."""
+    (tmp_path / "agents" / "debut" / "journal").mkdir(parents=True)
+    cloned = NOW - timedelta(minutes=2)      # someone else's commit, just now
+    assert doctor.missing_journals(
+        [run(agent="debut", ago_h=0.1)], tmp_path, since=cloned) == []
+
+
+def test_an_entry_that_never_landed_is_still_reported(tmp_path):
+    """The grace delays the finding by one tick. It does not forgive it."""
+    (tmp_path / "agents" / "debut" / "journal").mkdir(parents=True)
+    cloned = NOW - timedelta(minutes=2)
+    assert doctor.missing_journals(
+        [run(agent="debut", ago_h=3)], tmp_path, since=cloned, now=NOW) != []
+
+
+def test_a_session_that_just_ended_is_too_young_to_judge(tmp_path):
+    """True whatever the working copy says — with no git metadata at all there
+    is no cutoff, and the wall clock is the only thing left to be patient with."""
+    (tmp_path / "agents" / "debut" / "journal").mkdir(parents=True)
+    fresh = [run(agent="debut", ago_h=0.05)]
+    assert doctor.missing_journals(fresh, tmp_path, now=NOW) == []
+    assert doctor.missing_journals(fresh, tmp_path) != [], \
+        "without a clock the old behaviour stands, so this is the clock's doing"
+
+
 def test_the_checkout_time_is_read_from_the_repo(tmp_path):
     import subprocess
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
@@ -269,6 +335,66 @@ def test_a_wake_nobody_answered_is_reported():
 
 def test_a_fresh_unhandled_wake_is_just_a_wake():
     assert doctor.stale_triggers([trig(handled=False, ago_h=0.5)], NOW) == []
+
+
+# ---------- reading one instant, not two ----------
+#
+# 2026-08-05: doctor reported $25,000, $25,000 and $80,000 of unexplained cash
+# across maverick, tempo and vertex, and the next tick reported nothing, with no
+# commit to main in between. The money never moved. gather read agent_state and
+# fills as two sequential selects, so a dispatch committing a trade between them
+# showed up as half a trade.
+
+class RecordingConn:
+    """A connection that answers every select with nothing and remembers the
+    order it was asked."""
+
+    def __init__(self):
+        self.statements = []
+        self.rollbacks = 0
+
+    def execute(self, sql, args=None):
+        self.statements.append(" ".join(str(sql).split()).lower())
+        return self
+
+    def fetchall(self):
+        return []
+
+    def rollback(self):
+        self.rollbacks += 1
+        self.statements.append("rollback")
+
+
+def test_the_book_and_its_fills_are_read_from_one_snapshot():
+    conn = RecordingConn()
+    doctor.gather(conn)
+    first = conn.statements[0] if conn.statements[0] != "rollback" else conn.statements[1]
+    assert first == "set transaction isolation level repeatable read", \
+        "the isolation level only takes if it opens the transaction"
+    reads = [s for s in conn.statements if s.startswith("select")]
+    assert any("from agent_state" in s for s in reads)
+    assert any("from fills" in s for s in reads)
+
+
+def test_the_snapshot_is_closed_even_when_a_check_raises():
+    """doctor holds a transaction open over every read it does. Leaving one open
+    on the way out is how a connection ends up idle-in-transaction and killed."""
+    conn = RecordingConn()
+    try:
+        with doctor.snapshot(conn):
+            raise RuntimeError("a check blew up")
+    except RuntimeError:
+        pass
+    assert conn.statements[-1] == "rollback"
+    assert conn.rollbacks == 2      # one to open cleanly, one to let go
+
+
+def test_doctor_never_writes_while_it_reads():
+    conn = RecordingConn()
+    doctor.gather(conn)
+    assert not [s for s in conn.statements
+                if s.startswith(("insert", "update", "delete"))]
+    assert conn.statements[-1] == "rollback"
 
 
 # ---------- the report ----------

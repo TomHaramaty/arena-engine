@@ -425,6 +425,15 @@ def tape_block(conn, limit=150):
     """Every action the floor took, newest first, built only from what the
     engine wrote at the time.
 
+    The floor is the traders on it, so the tape is theirs. A retired trader is
+    not listed, and its trades leaving the tape with it is what keeps the two
+    telling the same story: on 2026-08-14 ten house agents were retired in one
+    stroke, and the 31 resting orders cancelled with them would otherwise have
+    arrived as a wall of `pulled` events from names a visitor could no longer
+    look up. Nothing is deleted to achieve this — every fill, order and refusal
+    stays exactly where the engine wrote it, and the record in git is untouched.
+    This is a question of who the published tape is about.
+
     A trade's words come from wherever the record actually holds them: a market
     buy is given the thesis from the accepted operation of its own run (the
     orders table has no reason column for market orders), a stop or limit
@@ -460,6 +469,7 @@ def tape_block(conn, limit=150):
                   (select max(t.ts) from ticks t
                     where t.symbol = f.symbol and t.ts <= f.ts) as quoted_at
            from fills f
+           join agents ag on ag.id = f.agent_id and ag.status='active'
            left join orders o on o.id = f.order_id
            order by f.ts desc limit %s""", (limit,)
     ).fetchall():
@@ -476,8 +486,10 @@ def tape_block(conn, limit=150):
         })
 
     for o in conn.execute(
-        """select * from orders where kind <> 'market'
-           order by created_at desc limit %s""", (limit,)
+        """select o.* from orders o
+           join agents ag on ag.id = o.agent_id and ag.status='active'
+           where o.kind <> 'market'
+           order by o.created_at desc limit %s""", (limit,)
     ).fetchall():
         base = {"agent": o["agent_id"], "side": o["side"], "symbol": o["symbol"],
                 "mechanism": o["kind"], "trigger": order_trigger(o["kind"], o["params"]),
@@ -490,6 +502,7 @@ def tape_block(conn, limit=150):
 
     for o in conn.execute(
         """select o.*, r.agent_id from operations o join runs r on r.id=o.run_id
+           join agents ag on ag.id = r.agent_id and ag.status='active'
            where o.verdict='rejected' and o.type='place_order'
            order by o.created_at desc limit %s""", (limit,)
     ).fetchall():

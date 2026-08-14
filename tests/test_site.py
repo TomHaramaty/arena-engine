@@ -22,7 +22,7 @@ class FakeConn:
         s = " ".join(sql.split())
         if "from fills f" in s:
             self._rows = self.sets["fills"]
-        elif "from orders where kind <> 'market'" in s:
+        elif "from orders o" in s and "kind <> 'market'" in s:
             self._rows = self.sets["orders"]
         elif "o.verdict='rejected'" in s:
             self._rows = self.sets["rejected"]
@@ -56,6 +56,35 @@ def test_trigger_is_none_rather_than_wrong():
     assert site.order_trigger("trailing_stop", {"high_water": 10}) is None
     assert site.order_trigger("market", {"trigger_price": 5}) is None
     assert site.order_trigger("stop", None) is None
+
+
+# ---- the tape is about the traders on the floor --------------------------
+
+def test_every_tape_query_is_scoped_to_traders_on_the_floor():
+    """FakeConn cannot honour a join, so it would pass whether or not the filter
+    is there — and a double that shrugs at what it does not understand is how a
+    real defect becomes a green test. This asserts the contract in the SQL.
+
+    Without it, retiring a trader leaves its fills, its armed rules and its
+    refusals on a tape whose names a visitor can no longer look up.
+    """
+    class Spy(FakeConn):
+        def __init__(self):
+            super().__init__()
+            self.seen = []
+
+        def execute(self, sql, params=None):
+            self.seen.append(" ".join(sql.split()))
+            return super().execute(sql, params)
+
+    conn = Spy()
+    site.tape_block(conn)
+    sourced = [s for s in conn.seen
+               if " from fills " in s or " from orders o " in s
+               or "verdict='rejected'" in s]
+    assert len(sourced) == 3, "fills, resting rules, refusals — all three"
+    for s in sourced:
+        assert "ag.status='active'" in s, f"unscoped tape query: {s}"
 
 
 # ---- the tape ------------------------------------------------------------

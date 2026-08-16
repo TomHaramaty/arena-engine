@@ -25,6 +25,8 @@ jobs:
     timeout-minutes: 120
     env:
       SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+      # Keeps "[agent] FAILED:" adjacent to its traceback — see tick.yml.
+      PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

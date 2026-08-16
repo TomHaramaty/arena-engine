@@ -14,6 +14,13 @@ jobs:
     timeout-minutes: 60
     env:
       SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+      # print() writes to stdout, traceback.print_exc() to stderr. On the
+      # runner's non-tty pipe CPython block-buffers the first and leaves the
+      # second unbuffered, so the two halves of a failure land out of order and
+      # minutes apart: on 2026-08-14 four reflections died and the log could not
+      # say which agents they were. A step killed by a timeout loses every
+      # buffered stdout line outright. One env var keeps them together.
+      PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

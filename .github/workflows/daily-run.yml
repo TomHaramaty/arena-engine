@@ -2,12 +2,16 @@ name: daily-run
 on:
   # Primary: Cloud Scheduler (arena-daily-run: 40 14,20 * * 1-5 UTC) via
   # workflow_dispatch. Backup: GH cron 10 min later — safe to double-fire
-  # because jobs/dispatch.py skips agents that already ran this slot today,
-  # so the backup no-ops whenever the primary fired. All active agents run
-  # both slots; the slot is inferred from the UTC hour when the input is
-  # blank (schedule events have no inputs): <17:00 = 'open', else 'close'.
+  # because jobs/dispatch.py skips agents that already ran this slot today.
+  # All active agents run both slots; the slot is inferred from the UTC hour
+  # when the input is blank: <17:00 = 'open', else 'close'. GitHub fires the
+  # backup hours late, so an inferred slot runs only inside its window
+  # (jobs/dispatch.SLOT_WINDOWS) — a late backup refuses rather than running
+  # the wrong session. Two cron lines, not one, so the letter steps below can
+  # tell which backup fired.
   schedule:
-    - cron: "50 14,20 * * 1-5"
+    - cron: "50 14 * * 1-5"
+    - cron: "50 20 * * 1-5"
   workflow_dispatch:
     inputs:
       slot:

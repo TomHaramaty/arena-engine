@@ -75,6 +75,31 @@ def daily_slot():
     return "open" if datetime.now(timezone.utc).hour < 17 else "close"
 
 
+#: UTC hours [start, end) in which an inferred slot may run. GitHub's backup
+#: cron has landed three to five hours late since September 2026: the 14:50
+#: backup arrived after 17:00 and ran the close before the bell, the 20:50
+#: backup arrived after midnight and ran the next day's open overnight, and on
+#: 2026-10-03 it ran a full session on a Saturday. Both bells (14:40 and 20:40,
+#: or 15:40 and 21:40 once US daylight time ends) sit inside these windows.
+SLOT_WINDOWS = {"open": (13, 17), "close": (20, 24)}
+
+
+def out_of_window(slot):
+    """Why an inferred slot must not run now, or None if it may.
+
+    An explicit DAILY_SLOT is an operator's deliberate catch-up and is never
+    refused; only a slot guessed from the clock is held to its window."""
+    if os.environ.get("DAILY_SLOT") in ("open", "close"):
+        return None
+    now = datetime.now(timezone.utc)
+    start, end = SLOT_WINDOWS[slot]
+    if now.weekday() >= 5 or not start <= now.hour < end:
+        return (f"fired at {now:%a %H:%M} UTC, outside the {slot} window "
+                f"({start:02d}:00-{end - 1:02d}:59 UTC, weekdays) — a late "
+                f"backup; not running")
+    return None
+
+
 def dispatch(triggers_only):
     conn = db.connect()
     if triggers_only:
@@ -92,6 +117,10 @@ def dispatch(triggers_only):
         rows = [r for r in rows if r["id"] not in spent]
     else:
         slot = daily_slot()
+        refused = out_of_window(slot)
+        if refused:
+            print(f"daily slot: {slot} {refused}")
+            return
         # Two guards make duplicate triggers harmless:
         # - already-ran: skip any agent with a scheduled run this slot today
         #   (a crashed 'started' run also counts — brain runs are not

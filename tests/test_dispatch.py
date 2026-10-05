@@ -76,12 +76,56 @@ def test_a_nonsense_slot_falls_back_to_the_clock(monkeypatch):
     assert dispatch.daily_slot() == "open"
 
 
-def _clock(hour, minute):
+def _clock(hour, minute, day=30, month=7):
     class Fixed(datetime):
         @classmethod
         def now(cls, tz=None):
-            return datetime(2026, 7, 30, hour, minute, tzinfo=timezone.utc)
+            return datetime(2026, month, day, hour, minute, tzinfo=timezone.utc)
     return Fixed
+
+
+# ---------- the late backup ----------
+
+@pytest.mark.parametrize("when", [
+    (0, 12, 1, 10),    # Thu 2026-10-01: the 20:50 backup ran Thursday's open overnight
+    (19, 34, 2, 10),   # Fri 2026-10-02: the 14:50 backup ran the close before the bell
+    (0, 1, 3, 10),     # Sat 2026-10-03: a full session on a Saturday
+    (14, 40, 4, 10),   # Sun: no bell at all
+])
+def test_a_late_backup_runs_nobody(when, ran, monkeypatch, capsys):
+    hour, minute, day, month = when
+    conn = StubConn(due=["tempo"])
+    monkeypatch.setattr(dispatch.db, "connect", lambda: conn)
+    monkeypatch.setenv("DAILY_SLOT", "")
+    monkeypatch.setattr(dispatch, "datetime", _clock(hour, minute, day, month))
+    dispatch.dispatch(triggers_only=False)
+    assert ran == []
+    assert conn.asked == []
+    assert "late backup; not running" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("hour, minute, slot", [
+    (14, 40, "open"), (15, 40, "open"), (20, 40, "close"), (21, 40, "close"),
+])
+def test_the_bells_still_ring_on_a_weekday(hour, minute, slot, ran, monkeypatch, capsys):
+    """The primaries send a blank slot too, so the windows must hold both bells,
+    before and after US daylight time ends."""
+    conn = StubConn(due=["tempo"])
+    monkeypatch.setattr(dispatch.db, "connect", lambda: conn)
+    monkeypatch.setenv("DAILY_SLOT", "")
+    monkeypatch.setattr(dispatch, "datetime", _clock(hour, minute, 5, 10))
+    dispatch.dispatch(triggers_only=False)
+    assert ran == [("tempo", "scheduled")]
+    assert f"daily slot: {slot}" in capsys.readouterr().out
+
+
+def test_an_explicit_slot_is_an_operators_catch_up_and_is_never_refused(ran, monkeypatch):
+    conn = StubConn(due=["tempo"])
+    monkeypatch.setattr(dispatch.db, "connect", lambda: conn)
+    monkeypatch.setenv("DAILY_SLOT", "open")
+    monkeypatch.setattr(dispatch, "datetime", _clock(18, 0, 3, 10))
+    dispatch.dispatch(triggers_only=False)
+    assert ran == [("tempo", "scheduled")]
 
 
 # ---------- the ceiling ----------
@@ -173,6 +217,7 @@ def test_a_few_flaky_brains_do_not_make_the_slot_a_failure(monkeypatch, capsys):
     """Thirty-two of thirty-five sessions happened. That is the slot working."""
     conn = StubConn(due=_floor(35))
     monkeypatch.setattr(dispatch.db, "connect", lambda: conn)
+    monkeypatch.setenv("DAILY_SLOT", "open")
     monkeypatch.setattr(dispatch, "run_agent", _fails("a", "b", "c"))
     dispatch.dispatch(triggers_only=False)   # green
     out = capsys.readouterr().out
@@ -183,6 +228,7 @@ def test_a_few_flaky_brains_do_not_make_the_slot_a_failure(monkeypatch, capsys):
 def test_a_slot_losing_more_than_a_tenth_of_the_floor_is_a_failure(monkeypatch):
     conn = StubConn(due=_floor(35))
     monkeypatch.setattr(dispatch.db, "connect", lambda: conn)
+    monkeypatch.setenv("DAILY_SLOT", "open")
     monkeypatch.setattr(dispatch, "run_agent", _fails("a", "b", "c", "d"))
     with pytest.raises(SystemExit):
         dispatch.dispatch(triggers_only=False)
@@ -194,6 +240,7 @@ def test_a_tolerated_failure_is_still_reported(monkeypatch):
     seen = []
     conn = StubConn(due=_floor(35))
     monkeypatch.setattr(dispatch.db, "connect", lambda: conn)
+    monkeypatch.setenv("DAILY_SLOT", "open")
     monkeypatch.setattr(dispatch, "run_agent", _fails("a"))
     monkeypatch.setattr(dispatch.obs, "capture",
                         lambda exc, **tags: seen.append(tags))
